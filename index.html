@@ -185,6 +185,9 @@
   /* sleek "Add my ORQA" connect CTA (shown when no pod is paired) */
   #bottleChip.addmode { padding:7px 14px 7px 9px; border-color:rgba(120,240,222,.55); background:linear-gradient(120deg, rgba(70,224,210,.16), rgba(9,28,43,.5)); animation:addpulse 2.4s ease-in-out infinite; }
   #bottleChip.addmode b { color:#cffef6; font-weight:600; letter-spacing:.01em; }
+  .addPodCTA { display:flex; align-items:center; gap:11px; width:100%; margin:2px 0 22px; padding:15px 18px; border-radius:16px; font-size:15px; font-weight:600; color:#cffef6; cursor:pointer; border:1px solid rgba(120,240,222,.55); background:linear-gradient(120deg, rgba(70,224,210,.18), rgba(9,28,43,.55)); box-shadow:0 8px 24px rgba(70,224,210,.14); animation:addpulse 2.4s ease-in-out infinite; }
+  .addPodCTA:active { transform:scale(.98); }
+  .addPodCTA .addIcon { width:24px; height:24px; border-radius:50%; background:#46e0d2; color:#04303a; font-weight:700; font-size:16px; line-height:1; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(70,224,210,.6); }
   #bottleChip .addIcon { width:19px; height:19px; border-radius:50%; background:#46e0d2; color:#04303a; font-weight:700; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(70,224,210,.6); }
   @keyframes addpulse { 0%,100%{ box-shadow:0 0 0 1px rgba(70,224,210,.22), 0 6px 18px rgba(70,224,210,.12); } 50%{ box-shadow:0 0 0 1px rgba(70,224,210,.5), 0 8px 26px rgba(70,224,210,.3); } }
   #bottleChip .conn.live { animation: livedot 1.4s ease-in-out infinite; }
@@ -1510,9 +1513,9 @@ function updateHome(){
 function refreshBottleChip(){ const p=window.__pod; const on=!!(p&&p.connected);
   { const bt=document.querySelector('#tabbar .tab[data-tab="bottle"]'); if(bt) bt.classList.toggle('connected', on); }   // nav-bar shows the connection state
   const chip=document.getElementById('bottleChip'); if(!chip) return;
-  if(chip._on!==on){ chip._on=on; chip.classList.toggle('addmode', !on);   // rebuild only when the connected state flips
-    chip.innerHTML = on ? '<span class="lvl"></span><b></b>'
-                        : '<span class="addIcon">＋</span><b>Add my ORQA</b>'; }
+  chip.style.display = on ? '' : 'none';   // "Add my ORQA" now lives in the Bottle tab — home stays uncluttered
+  if(chip._on!==on){ chip._on=on; chip.classList.remove('addmode');
+    if(on) chip.innerHTML = '<span class="lvl"></span><b></b>'; }
   if(on){ const lvl=chip.querySelector('.lvl'), b=chip.querySelector('b'); const bd=battDisplay();
     if(lvl){ lvl.style.setProperty('--fill', (bd.pct!=null?bd.pct:0)+'%'); lvl.style.setProperty('--battc', battAccent(bd.pct)); }
     if(b) b.textContent=bd.text;
@@ -1684,7 +1687,8 @@ function renderPod(filter){ filter=filter||'goal'; panelBody.innerHTML=podHTML(f
 }
 function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=POD.connected?Math.max(0,Math.min(100,Math.round((ml/HS.capacity)*100))):0; const bd=battDisplay();
   return `<div class="ins">
-  <div class="insLede">Your <b>ORQA pod</b> ${POD.connected?'· connected, live':"· not paired — connect in dev"}.</div>
+  <div class="insLede">Your <b>ORQA pod</b> ${POD.connected?'· connected, live':'· not paired yet'}.</div>
+  ${POD.connected?'':'<button class="addPodCTA" id="addPodBtn"><span class="addIcon">＋</span> Add my ORQA</button>'}
   <div class="insSec"><div class="lbl">LIVE STATUS</div>
     <div class="bstatus"><div class="bottleViz"><div class="bfill" id="blvFill" style="height:${wl}%"></div><span id="blvFillT">${POD.connected?ml+' ml':'—'}</span></div>
       <div class="bstats">
@@ -1729,6 +1733,7 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
 </div>`; }
 function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggleUI==='function') fxSyncToggleUI();
+  { const ap=$('addPodBtn'); if(ap) ap.onclick=()=>connectPod(); }
   { const rb=$('ringbtl'); if(rb && !$('btele')){ const tb=document.createElement(rb.tagName); tb.id='btele'; tb.className=rb.className; tb.textContent='📡 Live telemetry stream'; rb.parentNode.insertBefore(tb, rb.nextSibling); tb.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); }; } }   // telemetry moved here from the old floating chip
   panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ if(typeof glowFlash==='function') glowFlash(parseInt(s.dataset.c)); toast('Bottle glow set'); });
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
