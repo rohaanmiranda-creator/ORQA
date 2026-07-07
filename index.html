@@ -566,6 +566,9 @@
   .devNote { font-size:10.5px; color:#6f93a6; margin:1px 0 5px; }
   .devBtn { display:block; width:100%; text-align:left; padding:11px 13px; margin:6px 0; border-radius:12px; font-size:13px; color:#eafcff; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); }
   .devBtn:active { transform:scale(.98); }
+  .dpBtns { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .dpBtns .chip { cursor:pointer; }
+  .dpv.ok { color:#7ff0e4; } .dpv.off { color:#ff8f8f; }
   .devRow { display:flex; align-items:center; gap:10px; margin:9px 0; font-size:12px; color:#bfe6f0; }
   .devRow span:first-child { width:48px; }
   .devRow input[type=range] { flex:1; accent-color:#46e0d2; }
@@ -1704,6 +1707,40 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       </div></div>
     <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Tare / zero scale — <b>empty the bottle first</b></div><span class="evJoin" id="btare">Tare now</span></div></div>
   <div class="insHair"></div>
+  <div class="insSec"><div class="lbl">🛠 DEVELOPER · POD CONNECTION</div>
+    <div class="bsub">Live BLE diagnostics + command test — for hardware bring-up.</div>
+    <div class="bstats" style="margin-top:6px">
+      <div class="brow"><span>Web Bluetooth</span><b id="dpBt">—</b></div>
+      <div class="brow"><span>Status</span><b id="dpStatus" class="dpv off">—</b></div>
+      <div class="brow"><span>Device</span><b id="dpDev">—</b></div>
+      <div class="brow"><span>Service 0x180D</span><b id="dpSvc">—</b></div>
+      <div class="brow"><span>Characteristics</span><b id="dpChars">—</b></div>
+      <div class="brow"><span>Last frame</span><b id="dpAge">—</b></div>
+      <div class="brow"><span>Raw weight</span><b id="dpW">—</b></div>
+      <div class="brow"><span>Volume (stable)</span><b id="dpVol">—</b></div>
+      <div class="brow"><span>Tilt</span><b id="dpTilt">—</b></div>
+      <div class="brow"><span>Pod state</span><b id="dpState">—</b></div>
+      <div class="brow"><span>Accel x/y/z</span><b id="dpAccel">—</b></div>
+      <div class="brow"><span>Battery / Voltage</span><b id="dpBattV">—</b></div>
+    </div>
+    <div class="dpBtns">
+      <button class="chip" id="dpConnect">Connect</button>
+      <button class="chip" id="dpReconnect">Reconnect</button>
+      <button class="chip" id="dpDisconnect">Disconnect</button>
+      <button class="chip" id="dpStream">Raw stream ▸</button>
+    </div>
+    <div class="bsub" style="margin-top:12px">Command test · writes char 0x2A59</div>
+    <div class="dpBtns">
+      <button class="chip" data-devcmd="TARE">Tare</button>
+      <button class="chip" data-devcmd="GLOW:0x46e0d2:1500">Glow</button>
+      <button class="chip" data-devcmd="GLOW:OFF">Glow off</button>
+      <button class="chip" data-devcmd="VIBE:180">Vibe</button>
+      <button class="chip" data-devcmd="BUZZ:2000:150">Buzz</button>
+      <button class="chip" data-devcmd="SHOW">8s show</button>
+      <button class="chip" data-devcmd="RESETDAY">Reset day</button>
+    </div>
+  </div>
+  <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
     <div class="bsub">Glow colour</div>
     <div class="swatches" id="bglow"><span style="background:#46e0d2" data-c="0x46e0d2"></span><span style="background:#3b82f6" data-c="0x3b82f6"></span><span style="background:#22c55e" data-c="0x22c55e"></span><span style="background:#f43f5e" data-c="0xf43f5e"></span><span style="background:#ffffff" data-c="0xffffff"></span></div>
@@ -1732,8 +1769,35 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
     <div class="brow" id="bdiscRow" style="${POD.connected?'':'display:none'}"><span>Bluetooth</span><b id="bdisc" style="color:#ff8f8f;cursor:pointer">Disconnect ›</b></div>
   </div>
 </div>`; }
+function refreshDevPod(){
+  const g=id=>document.getElementById(id); if(!g('dpStatus')) return;   // only when the dev section is on-screen
+  const p=POD, set=(id,v,cls)=>{ const e=g(id); if(e){ e.textContent=v; if(cls!=null) e.className=cls; } };
+  set('dpBt', ('bluetooth' in navigator)?'supported':'unavailable');
+  set('dpStatus', p.connected?(p.mock?'Connected · DEMO':'Connected · LIVE'):'Offline', 'dpv '+(p.connected?'ok':'off'));
+  set('dpDev', (p.device&&p.device.name)||(p.mock?'MockPod (demo)':'—'));
+  set('dpSvc', p.connected?'✓ primary':'—');
+  set('dpChars', p.connected?('live+sip+evt'+(p.cmdChar?' + cmd':' · no cmd char')):'—');
+  const age=p._lastFrame?((Date.now()-p._lastFrame)/1000):null;
+  set('dpAge', p.connected&&age!=null?age.toFixed(1)+'s ago':'—');
+  set('dpW', p.connected?(p.waterMl||0).toFixed(0)+' g':'—');
+  set('dpVol', p.connected?Math.round((typeof stableWaterMl==='function'?stableWaterMl():p.waterMl)||0)+' ml':'—');
+  set('dpTilt', p.connected?(p.tiltDeg||0).toFixed(0)+'° '+(p.stable?'· stable':'· moving'):'—');
+  set('dpState', p.connected?(p.state||'—'):'—');
+  set('dpAccel', p.connected?[p.ax,p.ay,p.az].map(v=>(v||0).toFixed(2)).join(' / '):'—');
+  set('dpBattV', p.connected?((p.battery!=null?p.battery+'%':'—')+(p.voltage!=null?' · '+p.voltage.toFixed(2)+' V':'')):'—');
+}
+setInterval(()=>{ if(activeTab==='bottle' && document.body.classList.contains('panel-open')) refreshDevPod(); }, 450);
 function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggleUI==='function') fxSyncToggleUI();
   { const ap=$('addPodBtn'); if(ap) ap.onclick=()=>connectPod(); }
+  { const g=id=>document.getElementById(id);
+    const dc=g('dpConnect'); if(dc) dc.onclick=()=>connectPod();
+    const dr=g('dpReconnect'); if(dr) dr.onclick=()=>{ if(POD.device && typeof tryReconnect==='function') tryReconnect(); else connectPod(); };
+    const dd=g('dpDisconnect'); if(dd) dd.onclick=()=>disconnectPod();
+    const dsr=g('dpStream'); if(dsr) dsr.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); };
+    panelBody.querySelectorAll('[data-devcmd]').forEach(bt=>bt.onclick=()=>{ const cmd=bt.getAttribute('data-devcmd');
+      if(!POD.connected){ toast('Connect the pod first'); return; }
+      if(podCommand(cmd)) toast('Sent · '+cmd); else toast('No command channel on this pod'); });
+    refreshDevPod(); }
   { const rb=$('ringbtl'); if(rb && !$('btele')){ const tb=document.createElement(rb.tagName); tb.id='btele'; tb.className=rb.className; tb.textContent='📡 Live telemetry stream'; rb.parentNode.insertBefore(tb, rb.nextSibling); tb.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); }; } }   // telemetry moved here from the old floating chip
   panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ if(typeof glowFlash==='function') glowFlash(parseInt(s.dataset.c)); toast('Bottle glow set'); });
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
