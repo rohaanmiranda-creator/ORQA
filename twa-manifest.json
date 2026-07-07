@@ -34,5 +34,7 @@
   "signingKey": {
     "path": "./android.keystore",
     "alias": "android"
-  }
+  },
+  "splashScreenFadeOutDuration": 300,
+  "generatorApp": "bubblewrap-cli"
 }
