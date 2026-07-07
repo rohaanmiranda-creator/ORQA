@@ -119,7 +119,8 @@
               background:linear-gradient(90deg, rgba(255,255,255,0), #fff); border-radius:2px; transform:rotate(18deg);
               filter:drop-shadow(0 0 6px #cfeefa); }
 
-  #scene { position:fixed; inset:0; z-index:2; }
+  #scene, #sky, #caustics, #godrays { display:none !important; }   /* replaced by the 2D coast-to-abyss canvas (owns its own god-rays/caustics) */
+  #ocean { position:fixed; inset:0; width:100vw; height:100vh; z-index:0; display:block; }
   #scene canvas { display:block; }
 
 
@@ -752,7 +753,7 @@
 <script>setTimeout(function(){var l=document.getElementById('loader');if(l)l.classList.add('hide');document.body.classList.add('app-ready');},6000);</script>
 </head>
 <body class="tod-day">
-  <div id="ocean"></div>
+<canvas id="ocean"></canvas>
   <div id="caustics"></div>
   <div id="godrays"><div class="ray r1"></div><div class="ray r2"></div><div class="ray r3"></div></div>
   <!-- stars/shooting/aurora now live inside #sky so the living night sky is clipped to the air region -->
@@ -1384,6 +1385,7 @@ window.__hunt=(x,y)=>{ if(fish){ fishTarget.set(x,y); fishHunt=true; fishPressed
 const clock=new THREE.Clock();
 function animate(){
   requestAnimationFrame(animate);
+  if(window.__use2dBg) return;   // 2D canvas background owns the visuals now
   const dt=Math.min(0.1, clock.getDelta()); const t=clock.elapsedTime; window.__f=(window.__f||0)+1;
   if(document.body.classList.contains('panel-open')&&!document.body.classList.contains('immersive')){ window.__pa=(window.__pa||0)+dt; if(window.__pa<0.1){ return; } window.__pa=0; } else { window.__pa=0; }
 
@@ -1484,6 +1486,7 @@ function placeSkyOrb(){ const p=ORB_POS[todIdx]||ORB_POS[0]; if(SKY.skyEl){ SKY.
 placeSkyOrb(); window.__placeSkyOrb=placeSkyOrb;
 function stepSkyLife(now){
   requestAnimationFrame(stepSkyLife);
+  if(window.__use2dBg) return;
   if(skyHidden()){ stepSkyLife._t=now; return; }
   if(now-(stepSkyLife._acc||0) < 33) return; const dt=Math.min(0.1, ((now-(stepSkyLife._t||now))/1000)||0); stepSkyLife._t=now; stepSkyLife._acc=now;
   const T=(now||0)/1000;
@@ -3635,6 +3638,1038 @@ ORQA.auth = (function(){
   return api;
 })();
 try{ ORQA.auth.init(); }catch(e){ console.warn('[auth]', e); }
+</script>
+<script>
+window.__use2dBg = true;
+'use strict';
+/* =====================================================================
+   ORQA v2 — coast-to-abyss scrolling background
+   Single-file HTML5 canvas. No dependencies.
+
+   World space: a tall vertical world (CONFIG.worldVh viewport-heights).
+   A fixed canvas camera follows page scroll (spacer div sets scroll
+   length). worldY 0 = top of sky; WATER_Y = sea surface; WORLD_H = sea
+   floor. Underwater drawing happens under translate(0, -camY).
+
+   Interactions:
+   - Click/tap in the surface zone -> nearest cruising orca breaches at
+     that x (curved ascent -> ballistic arc -> splash -> dive -> cruise).
+   - Scroll -> camera descends from coast to fully underwater.
+
+   ---- TUNE HERE ----------------------------------------------------- */
+const CONFIG = {
+  /* world */
+  worldVh:       1.9,      // world height in viewport-heights (scroll ~0.9 screens)
+  waterVh:       0.52,     // waterline worldY in viewport-heights (land = top ~52%)
+  breachZoneVh:  0.30,     // clicks down to WATER_Y + this*H trigger a breach
+  /* pod */
+  podSize:       4,
+  baseSpeed:     26,       // px/s cruise at scale 1
+  speedJitter:   0.35,
+  strokeHz:      0.42,     // tail-beats per second
+  waveNumber:    1.6,      // flex cycles along body (~1 = real cetacean cruise)
+  maxFlex:       0.14,     // flex amplitude in body-lengths
+  bobAmpPx:      10,
+  bobHz:         0.05,
+  turnDrift:     0.06,
+  minScale:      0.45,
+  maxScale:      1.0,
+  bodyLenAtS1:   340,
+  /* breach */
+  gravity:       1900,     // px/s^2 at scale 1
+  breachApexLen: 1.0,      // apex height above surface, in body-lengths
+  /* divers */
+  diverCount:    2,
+  diverSpeed:    11,       // px/s drift
+  kickHz:        0.9,      // flutter-kick rate
+  exhaleEvery:   [2.8, 4.6], // seconds between exhaust bursts
+  /* ambience */
+  showGodRays:   true,
+  showBubbles:   true,
+  bubbleCount:   140,      // ambient particulate ("bubbles")
+  cloudCount:    6,
+  surfWaveAmp:   1.0,      // surface wave amplitude multiplier
+  palette: {
+    skyTop:  '#a9def1', skyHorizon: '#e8f3f5',
+    sun:     'rgba(255,246,220,',
+    sand:    '#e3d4a9', sandWet: '#cfbd93',
+    foam:    'rgba(242,251,253,',
+    top:     '#2b6f8e', mid: '#0e3a52', deep: '#061b2a', abyss: '#02090f',
+    body:    '#0a0f16', bodyLo: '#12202b',
+    white:   '#e6eef3',
+    saddle:  'rgba(120,150,168,0.35)',
+    rim:     'rgba(150,205,230,0.55)',
+    ray:     'rgba(150,200,225,1)',
+    snow:    'rgba(205,225,235,1)',
+    glow:    'rgba(190,230,245,',
+    tank:    '#4d6273',
+    bubble:  'rgba(210,235,245,'
+  }
+};
+/* =================================================================== */
+
+const TAU = Math.PI * 2;
+const P   = CONFIG.palette;
+const cv  = document.getElementById('ocean');
+const ctx = cv.getContext('2d');
+const spacer = document.getElementById('spacer');
+const RM  = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let W = 0, H = 0, DPR = 1;
+let WORLD_H = 0, WATER_Y = 0, MAX_SCROLL = 0;
+let camY = 0, camTarget = 0, tNow = 0;
+let SIZ = 1, lastW = 0, lastH = 0;   // SIZ: viewport size factor (set in resize)
+
+/* ---- helpers ---- */
+const rand  = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp  = (a, b, t) => a + (b - a) * t;
+const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+const qb  = (B, u) => ({
+  x: (1-u)*(1-u)*B.p0.x + 2*(1-u)*u*B.p1.x + u*u*B.p2.x,
+  y: (1-u)*(1-u)*B.p0.y + 2*(1-u)*u*B.p1.y + u*u*B.p2.y
+});
+const qbt = (B, u) => ({
+  x: 2*(1-u)*(B.p1.x-B.p0.x) + 2*u*(B.p2.x-B.p1.x),
+  y: 2*(1-u)*(B.p1.y-B.p0.y) + 2*u*(B.p2.y-B.p1.y)
+});
+
+// Smooth CLOSED curve through a point loop (C1, quadratic w/ midpoint anchors)
+function smoothClosed(pts) {
+  const n = pts.length; if (n < 3) return;
+  const mx = (a, b) => (a.x + b.x) / 2, my = (a, b) => (a.y + b.y) / 2;
+  ctx.moveTo(mx(pts[n-1], pts[0]), my(pts[n-1], pts[0]));
+  for (let i = 0; i < n; i++) {
+    const c = pts[i], nx = pts[(i+1) % n];
+    ctx.quadraticCurveTo(c.x, c.y, mx(c, nx), my(c, nx));
+  }
+  ctx.closePath();
+}
+function smoothOpen(pts) {
+  const n = pts.length; if (n < 2) return;
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < n - 1; i++) {
+    const c = pts[i], nx = pts[i+1];
+    ctx.quadraticCurveTo(c.x, c.y, (c.x+nx.x)/2, (c.y+nx.y)/2);
+  }
+  ctx.lineTo(pts[n-1].x, pts[n-1].y);
+}
+
+/* animated sea surface (world y at world x) */
+function surfaceY(x, t) {
+  const a = (RM ? 0.3 : 1) * CONFIG.surfWaveAmp;
+  return WATER_Y + Math.sin(x*0.006 + t*0.7)*4*a + Math.sin(x*0.0113 - t*1.15)*2.5*a;
+}
+
+/* ---- cached gradients (world-space; rebuilt on resize) ---- */
+let skyGrad, waterGrad, glowGrad, sunGrad;
+const SUN = { x: 0, y: 0, r: 0 };
+function buildGradients() {
+  skyGrad = ctx.createLinearGradient(0, 0, 0, WATER_Y);
+  skyGrad.addColorStop(0, P.skyTop);
+  skyGrad.addColorStop(1, P.skyHorizon);
+
+  waterGrad = ctx.createLinearGradient(0, WATER_Y, 0, WORLD_H);
+  waterGrad.addColorStop(0.00, P.top);
+  waterGrad.addColorStop(0.26, P.mid);
+  waterGrad.addColorStop(0.62, P.deep);
+  waterGrad.addColorStop(1.00, P.abyss);
+
+  glowGrad = ctx.createLinearGradient(0, WATER_Y, 0, WATER_Y + 95);
+  glowGrad.addColorStop(0, P.glow + '0.16)');
+  glowGrad.addColorStop(1, P.glow + '0)');
+
+  SUN.x = W * 0.76; SUN.y = H * 0.14; SUN.r = H * 0.16;
+  sunGrad = ctx.createRadialGradient(SUN.x, SUN.y, 0, SUN.x, SUN.y, SUN.r);
+  sunGrad.addColorStop(0, P.sun + '0.85)');
+  sunGrad.addColorStop(1, P.sun + '0)');
+}
+
+/* ---- land (sky + sun + clouds + beach; mountains removed per request) ---- */
+function drawLand() {
+  // sky
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, WATER_Y + 8);
+  // sun
+  ctx.fillStyle = sunGrad;
+  ctx.fillRect(SUN.x - SUN.r, SUN.y - SUN.r, SUN.r * 2, SUN.r * 2);
+  ctx.beginPath();
+  ctx.arc(SUN.x, SUN.y, H * 0.034, 0, TAU);
+  ctx.fillStyle = 'rgba(255,250,235,0.95)';
+  ctx.fill();
+  // clouds
+  drawClouds();
+  // beach: a slimmer sand strip + wet band at the waterline (waves overlap -> surf)
+  const sandTop = WATER_Y - H * 0.03;
+  ctx.fillStyle = P.sand;
+  ctx.fillRect(0, sandTop, W, (WATER_Y + 12) - sandTop);
+  ctx.fillStyle = P.sandWet;
+  ctx.fillRect(0, WATER_Y - 7, W, 16);
+}
+
+/* ---- clouds ---- */
+let clouds = [];
+function initClouds() {
+  clouds = [];
+  for (let i = 0; i < CONFIG.cloudCount; i++) {
+    clouds.push({
+      x: rand(0, W),
+      y: rand(H * 0.06, H * 0.42),
+      u: H * 0.03 * rand(0.75, 1.45),   // puff unit
+      v: rand(6, 16) * (RM ? 0.25 : 1)  // drift px/s
+    });
+  }
+}
+function drawClouds() {
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  for (const c of clouds) {
+    const u = c.u;
+    ctx.beginPath();
+    ctx.ellipse(c.x - 1.6*u, c.y + 0.20*u, 1.10*u, 0.66*u, 0, 0, TAU);
+    ctx.ellipse(c.x - 0.4*u, c.y - 0.50*u, 1.50*u, 0.95*u, 0, 0, TAU);
+    ctx.ellipse(c.x + 0.8*u, c.y - 0.15*u, 1.25*u, 0.80*u, 0, 0, TAU);
+    ctx.ellipse(c.x + 1.9*u, c.y + 0.30*u, 0.90*u, 0.55*u, 0, 0, TAU);
+    ctx.fill();
+  }
+}
+function stepClouds(dt) {
+  for (const c of clouds) {
+    c.x += c.v * dt;
+    if (c.x - 4*c.u > W) c.x = -4*c.u;
+  }
+}
+
+/* ---- god rays (world space, gradients cached) ---- */
+let rays = [];
+function layoutRays() {
+  rays = [];
+  if (!CONFIG.showGodRays) return;
+  const n = 5, len = H * 0.95;
+  for (let i = 0; i < n; i++) {
+    const r = {
+      x: (i + 0.5) / n * W + rand(-W*0.06, W*0.06),
+      w: rand(W*0.05, W*0.11),
+      sway: rand(W*0.03, W*0.06),
+      phase: rand(0, TAU),
+      speed: rand(0.05, 0.12),
+      alpha: rand(0.05, 0.11),
+      len
+    };
+    const g = ctx.createLinearGradient(0, WATER_Y, 0, WATER_Y + len);
+    g.addColorStop(0, P.ray.replace('1)', r.alpha + ')'));
+    g.addColorStop(1, P.ray.replace('1)', '0)'));
+    r.grad = g;
+    rays.push(r);
+  }
+}
+function drawRays(t) {
+  if (!CONFIG.showGodRays || rays.length === 0) return;
+  if (camY > WATER_Y + rays[0].len || camY + H < WATER_Y) return;
+  ctx.globalCompositeOperation = 'screen';
+  for (const r of rays) {
+    const x = r.x + Math.sin(t*r.speed + r.phase) * r.sway;
+    ctx.fillStyle = r.grad;
+    ctx.beginPath();
+    ctx.moveTo(x - r.w*0.35, WATER_Y + 4);
+    ctx.lineTo(x + r.w*0.35, WATER_Y + 4);
+    ctx.lineTo(x + r.w, WATER_Y + r.len);
+    ctx.lineTo(x - r.w, WATER_Y + r.len);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---- ambient bubbles (per request: ~1.8x faster, gentle rise) ---- */
+let amb = [];
+function initAmbient() {
+  amb = [];
+  if (!CONFIG.showBubbles) return;
+  const count = Math.round(CONFIG.bubbleCount * clamp((W * H) / (1600 * 900), 0.35, 1));
+  for (let i = 0; i < count; i++) {
+    amb.push({
+      x: rand(0, W), y: rand(WATER_Y + 30, WORLD_H - 10),
+      r: rand(0.4, 1.8),
+      vx: rand(-6, -2)  * (RM ? 0.4 : 1),   // current drift (was -4..-1)
+      vy: rand(-14, -5) * (RM ? 0.4 : 1),   // rise (bubbles rise)
+      a: rand(0.05, 0.28),
+      tw: rand(0, TAU)
+    });
+  }
+}
+function drawAmbient(dt, t) {
+  if (!CONFIG.showBubbles) return;
+  for (const s of amb) {
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    if (s.x < -4) s.x = W + 4;
+    if (s.y < WATER_Y + 8) { s.y = WORLD_H - rand(5, 60); s.x = rand(0, W); }
+    const sy = s.y - camY;
+    if (sy < -20 || sy > H + 20) continue;
+    const a = s.a * (0.6 + 0.4 * Math.sin(t*0.8 + s.tw));
+    ctx.fillStyle = P.snow.replace('1)', a + ')');
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, TAU);
+    ctx.fill();
+  }
+}
+
+/* ---- splash (breach) + surface rings ---- */
+let drops = [], ringsFx = [];
+function spawnSplash(x, power) {
+  const sy = surfaceY(x, tNow);
+  const n = Math.round(16 * power);
+  for (let i = 0; i < n; i++) {
+    drops.push({
+      x: x + rand(-16, 16), y: sy,
+      vx: rand(-140, 140) * power,
+      vy: rand(-360, -100) * power,
+      r: rand(1.2, 3.1),
+      life: rand(0.5, 0.95)
+    });
+  }
+  ringsFx.push({ x, y: sy, r: 10, vr: 160 * power, a: 0.5 });
+  if (drops.length > 240) drops.splice(0, drops.length - 240);
+}
+function stepSplash(dt) {
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    d.vy += 980 * dt;
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    d.life -= dt;
+    if (d.life <= 0 || d.y > surfaceY(d.x, tNow) + 30) drops.splice(i, 1);
+  }
+  for (let i = ringsFx.length - 1; i >= 0; i--) {
+    const r = ringsFx[i];
+    r.r += r.vr * dt; r.vr *= Math.pow(0.4, dt); r.a -= dt * 0.55;
+    if (r.a <= 0) ringsFx.splice(i, 1);
+  }
+}
+function drawSplash() {
+  for (const d of drops) {
+    ctx.fillStyle = P.foam + clamp(d.life, 0, 1) + ')';
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.r, 0, TAU);
+    ctx.fill();
+  }
+  for (const r of ringsFx) {
+    ctx.strokeStyle = P.foam + clamp(r.a, 0, 1) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(r.x, r.y, r.r, r.r * 0.26, 0, 0, TAU);
+    ctx.stroke();
+  }
+}
+
+/* ---- diver exhaust bubbles ---- */
+let exh = [];
+function spawnExhale(x, y, s) {
+  const n = 3 + Math.floor(rand(0, 4));
+  for (let i = 0; i < n; i++) {
+    exh.push({
+      x: x + rand(-3, 3), y: y + rand(-2, 2),
+      r: rand(1.2, 2.6) * s,
+      vy: rand(-34, -22) * (RM ? 0.4 : 1),
+      wob: rand(6, 14), ph: rand(0, TAU),
+      a: 0.85
+    });
+  }
+  if (exh.length > 120) exh.splice(0, exh.length - 120);
+}
+function stepDrawExhale(dt, t) {
+  for (let i = exh.length - 1; i >= 0; i--) {
+    const b = exh[i];
+    b.y += b.vy * dt;
+    b.x += Math.sin(t*2.4 + b.ph) * b.wob * dt;
+    b.r += 0.8 * dt;
+    if (b.y < surfaceY(b.x, t) + 4) {
+      ringsFx.push({ x: b.x, y: surfaceY(b.x, t), r: 1.5, vr: 26, a: 0.22 });
+      exh.splice(i, 1); continue;
+    }
+    const sy = b.y - camY;
+    if (sy < -10 || sy > H + 10) continue;
+    ctx.strokeStyle = P.bubble + b.a + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.stroke();
+  }
+}
+
+/* =====================================================================
+   ORCA — flexing centerline body (dorsoventral wave), breach state
+   machine: cruise -> approach -> air (ballistic) -> dive -> cruise
+   =================================================================== */
+class Orca {
+  constructor(i, n) {
+    const depth = i / Math.max(1, n - 1);
+    this.depth = depth;
+    this.scale = lerp(CONFIG.maxScale, CONFIG.minScale, depth);
+    this.len   = CONFIG.bodyLenAtS1 * SIZ * this.scale;
+    this.dir   = Math.random() < 0.5 ? 1 : -1;
+    this.speed = CONFIG.baseSpeed * this.scale *
+                 (1 + rand(-CONFIG.speedJitter, CONFIG.speedJitter));
+    if (RM) this.speed *= 0.12;
+    this.x     = rand(0, W);
+    this.baseY = rand(WATER_Y + H*0.08, WORLD_H - H*0.12);
+    this.y     = this.baseY;
+    this.phase = rand(0, TAU);
+    this.bobPh = rand(0, TAU);
+    this.turnPh= rand(0, TAU);
+    this.state = 'cruise';
+    this.theta = this.dir === 1 ? 0 : Math.PI;  // world nose angle
+    this.flexMul = 1; this.bobMul = 1;
+    this.vx = 0; this.vy = 0;
+    this.B = null; this.pt = 0; this.pdur = 0;
+  }
+
+  /* centerline in LOCAL frame (nose +x); flex = dorsoventral travelling wave */
+  center(s, t) {
+    const L = this.len;
+    const x = (0.5 - s) * L;
+    const amp = CONFIG.maxFlex * L * Math.pow(smooth((s - 0.32) / 0.68), 1.25);
+    const flex = (RM ? 0.18 : 1) * this.flexMul;
+    const y = amp * flex *
+      Math.sin(TAU * CONFIG.strokeHz * t - CONFIG.waveNumber * s + this.phase);
+    return { x, y };
+  }
+
+  girth(s) {
+    const Gmax = this.len * 0.135;
+    let g = Gmax * Math.pow(Math.sin(Math.PI * Math.pow(clamp(s, 0, 1), 0.62)), 1.1);
+    if (s > 0.72) g *= lerp(1, 0.10, smooth((s - 0.72) / 0.28));
+    return g;
+  }
+
+  breach(targetX) {
+    if (this.state !== 'cruise') return;
+    const p0 = { x: this.x, y: this.y };
+    const p2 = { x: clamp(targetX, this.len*0.6, W - this.len*0.6),
+                 y: WATER_Y + this.len * 0.12 };
+    const d  = Math.hypot(p2.x - p0.x, p2.y - p0.y);
+    // control point: continue current heading, then sweep up into launch.
+    // p1 kept well below p2 so the final tangent points upward.
+    const p1 = { x: p0.x + this.dir * Math.max(70, d * 0.35),
+                 y: Math.max(p0.y + 40, p2.y + this.len * 0.9) };
+    this.B = { p0, p1, p2 };
+    this.pt = 0;
+    this.pdur = clamp(d / 520, 0.7, 1.5);
+    this.state = 'approach';
+  }
+
+  update(dt, t) {
+    // ease flex/bob toward per-state targets (body stiffens in air)
+    const ft = this.state === 'cruise' ? 1 :
+               this.state === 'approach' ? 0.7 :
+               this.state === 'air' ? 0.22 : 0.55;
+    this.flexMul += (ft - this.flexMul) * Math.min(1, dt * 4);
+    const bt = this.state === 'cruise' ? 1 : 0;
+    this.bobMul += (bt - this.bobMul) * Math.min(1, dt * 4);
+
+    if (this.state === 'cruise') {
+      const bob = Math.sin(TAU * CONFIG.bobHz * t + this.bobPh) *
+                  CONFIG.bobAmpPx * this.scale * this.bobMul;
+      this.baseY += Math.sin(TAU * 0.02 * t + this.turnPh) *
+                    CONFIG.turnDrift * dt * 24;
+      this.baseY = clamp(this.baseY, WATER_Y + H*0.07, WORLD_H - H*0.10);
+      this.x += this.dir * this.speed * dt;
+      const m = this.len * 0.9;
+      if (this.dir > 0 && this.x - m > W) { this.x = -m; this.baseY = rand(WATER_Y + H*0.08, WORLD_H - H*0.12); }
+      if (this.dir < 0 && this.x + m < 0) { this.x = W + m; this.baseY = rand(WATER_Y + H*0.08, WORLD_H - H*0.12); }
+      this.y = this.baseY + bob;
+      // level out (shortest-arc ease toward horizontal heading)
+      const tgt = this.dir === 1 ? 0 : Math.PI;
+      const dth = Math.atan2(Math.sin(tgt - this.theta), Math.cos(tgt - this.theta));
+      this.theta += dth * Math.min(1, dt * 5);
+
+    } else if (this.state === 'approach') {
+      this.pt += dt;
+      const u = smooth(clamp(this.pt / this.pdur, 0, 1));
+      const p = qb(this.B, u), tn = qbt(this.B, u);
+      this.x = p.x; this.y = p.y;
+      const tm = Math.hypot(tn.x, tn.y);
+      if (tm > 1e-3) {
+        this.theta = Math.atan2(tn.y, tn.x);
+        if (Math.abs(tn.x) > 0.2 * tm) this.dir = tn.x > 0 ? 1 : -1;
+      }
+      if (this.pt >= this.pdur) {
+        // launch: elevation from approach-end tangent, clamped steep
+        let elev = Math.atan2(-(this.B.p2.y - this.B.p1.y),
+                              Math.abs(this.B.p2.x - this.B.p1.x));
+        elev = clamp(elev, 0.84, 1.33);              // 48..76 deg
+        const g   = CONFIG.gravity * this.scale;
+        const h   = this.len * CONFIG.breachApexLen * rand(0.85, 1.15);
+        const vy0 = -Math.sqrt(2 * g * h);
+        const sgn = (this.B.p2.x - this.B.p1.x) >= 0 ? 1 : -1;
+        this.vx = Math.abs(vy0) / Math.tan(elev) * sgn;
+        this.vy = vy0;
+        this.dir = sgn;
+        this.state = 'air';
+        spawnSplash(this.x, 0.55 + 0.6 * this.scale);
+      }
+
+    } else if (this.state === 'air') {
+      const g = CONFIG.gravity * this.scale;
+      this.vy += g * dt;
+      this.x += this.vx * dt; this.y += this.vy * dt;
+      this.theta = Math.atan2(this.vy, this.vx);
+      if (this.vy > 0 && this.y > surfaceY(this.x, t) + this.len * 0.12) {
+        spawnSplash(this.x, 0.65 + 0.65 * this.scale);
+        const sp = Math.hypot(this.vx, this.vy) || 1;
+        const ux = this.vx / sp, uy = this.vy / sp;
+        const p0 = { x: this.x, y: this.y };
+        const p1 = { x: this.x + ux * this.len * 1.2, y: this.y + uy * this.len * 1.2 };
+        const ty = clamp(this.baseY, WATER_Y + H*0.10, WORLD_H - H*0.12);
+        const p2 = { x: this.x + (this.vx >= 0 ? 1 : -1) * this.len * 2.4, y: ty };
+        this.B = { p0, p1, p2 };
+        this.pt = 0; this.pdur = 1.25;
+        this.state = 'dive';
+      }
+
+    } else { /* dive */
+      this.pt += dt;
+      const uu = clamp(this.pt / this.pdur, 0, 1);
+      const u = 1 - Math.pow(1 - uu, 2);            // ease-out
+      const p = qb(this.B, u), tn = qbt(this.B, u);
+      this.x = p.x; this.y = p.y;
+      const tm = Math.hypot(tn.x, tn.y);
+      if (tm > 1e-3) {
+        this.theta = Math.atan2(tn.y, tn.x);
+        if (Math.abs(tn.x) > 0.2 * tm) this.dir = tn.x > 0 ? 1 : -1;
+      }
+      if (uu >= 1) {
+        this.state = 'cruise';
+        this.baseY = clamp(this.y, WATER_Y + H*0.20, WORLD_H - H*0.10);
+      }
+    }
+  }
+
+  draw(t) {
+    const sy = this.y - camY;
+    if (sy < -this.len || sy > H + this.len) return;   // offscreen cull
+
+    const N = 42;
+    const pts = [];
+    for (let k = 0; k <= N; k++) {
+      const s = k / N;
+      const c = this.center(s, t);
+      pts.push({ s, x: c.x, y: c.y });
+    }
+    for (let k = 0; k <= N; k++) {
+      const a = pts[Math.max(0, k - 1)];
+      const b = pts[Math.min(N, k + 1)];
+      let tx = b.x - a.x, ty = b.y - a.y;
+      const m = Math.hypot(tx, ty) || 1;
+      tx /= m; ty /= m;
+      pts[k].tx = tx; pts[k].ty = ty;          // unit tangent (interpolate this)
+      pts[k].nx = -ty; pts[k].ny = tx;
+      pts[k].ang = Math.atan2(ty, tx);         // per-sample only; never lerp
+    }
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.dir === 1 ? this.theta : this.theta - Math.PI);
+    ctx.scale(this.dir * this.scale, this.scale);
+    ctx.globalAlpha = lerp(1, 0.38, this.depth);
+
+    this._drawPectoral(pts, t);
+
+    const topEdge = [], botEdge = [];
+    for (let k = 0; k <= N; k++) {
+      const p = pts[k], g = this.girth(p.s);
+      topEdge.push({ x: p.x + p.nx * g, y: p.y + p.ny * g });
+      botEdge.push({ x: p.x - p.nx * g, y: p.y - p.ny * g });
+    }
+    const outline = topEdge.concat(botEdge.slice().reverse());
+    ctx.beginPath();
+    smoothClosed(outline);
+    // shading anchored to FIXED local coords (stable frame-to-frame)
+    const L = this.len;
+    const bgr = ctx.createLinearGradient(L*0.5, -L*0.12, -L*0.5, L*0.12);
+    bgr.addColorStop(0, P.bodyLo);
+    bgr.addColorStop(1, P.body);
+    ctx.fillStyle = bgr;
+    ctx.fill();
+
+    this._drawFlukes(pts, t);
+
+    ctx.save();
+    ctx.beginPath(); smoothClosed(outline); ctx.clip();
+    this._drawBelly(pts);
+    this._drawEyePatch(pts);
+    this._drawSaddle(pts);
+    ctx.restore();
+
+    this._drawDorsal(pts, t);
+
+    ctx.beginPath();
+    smoothOpen(topEdge);
+    ctx.strokeStyle = P.rim;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  _at(pts, s) {
+    const f = clamp(s, 0, 1) * (pts.length - 1);
+    const i = Math.floor(f), t = f - i;
+    const a = pts[i], b = pts[Math.min(pts.length - 1, i + 1)];
+    // Interpolate the tangent VECTOR then atan2 — never lerp the angle
+    // itself (±π branch cut was the historical tail-flip bug).
+    const tx = lerp(a.tx, b.tx, t), ty = lerp(a.ty, b.ty, t);
+    return {
+      x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t),
+      nx: lerp(a.nx, b.nx, t), ny: lerp(a.ny, b.ny, t),
+      ang: Math.atan2(ty, tx)
+    };
+  }
+
+  _drawDorsal(pts, t) {
+    const L = this.len;
+    const b0 = this._at(pts, 0.40), b1 = this._at(pts, 0.55);
+    const g0 = this.girth(0.40), g1 = this.girth(0.55);
+    const base0 = { x: b0.x + b0.nx * g0, y: b0.y + b0.ny * g0 };
+    const base1 = { x: b1.x + b1.nx * g1, y: b1.y + b1.ny * g1 };
+    const mid = this._at(pts, 0.47), gm = this.girth(0.47);
+    const h = L * 0.20, lean = -L * 0.06;
+    const apex = { x: mid.x + mid.nx * gm + lean, y: mid.y + mid.ny * gm - h };
+    ctx.beginPath();
+    ctx.moveTo(base0.x, base0.y);
+    ctx.quadraticCurveTo(base0.x + (apex.x - base0.x) * 0.4,
+                         base0.y + (apex.y - base0.y) * 0.75,
+                         apex.x, apex.y);
+    ctx.quadraticCurveTo(apex.x + L * 0.05, apex.y + h * 0.55,
+                         base1.x, base1.y);
+    ctx.closePath();
+    const dg = ctx.createLinearGradient(apex.x, apex.y, base1.x, base1.y);
+    dg.addColorStop(0, P.bodyLo);
+    dg.addColorStop(1, P.body);
+    ctx.fillStyle = dg;
+    ctx.fill();
+    ctx.strokeStyle = P.rim; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  _drawFlukes(pts, t) {
+    const L = this.len;
+    // Pivot at the peduncle; local +x (after rotate) points tail-ward,
+    // so the lobes TRAIL BEHIND with the notch forward of the tips.
+    const root = this._at(pts, 0.965);
+    ctx.save();
+    ctx.translate(root.x, root.y);
+    ctx.rotate(root.ang);
+    const sweep = L * 0.115, span = L * 0.115;
+    ctx.beginPath();
+    ctx.moveTo(-L * 0.012, 0);
+    ctx.quadraticCurveTo(sweep * 0.30,  span * 0.85,  sweep,  span);
+    ctx.quadraticCurveTo(sweep * 0.58,  span * 0.28,  sweep * 0.42, 0);
+    ctx.quadraticCurveTo(sweep * 0.58, -span * 0.28,  sweep, -span);
+    ctx.quadraticCurveTo(sweep * 0.30, -span * 0.85, -L * 0.012, 0);
+    ctx.closePath();
+    const fg = ctx.createLinearGradient(0, -span, 0, span);
+    fg.addColorStop(0.0, P.bodyLo);
+    fg.addColorStop(0.5, P.body);
+    fg.addColorStop(1.0, P.bodyLo);
+    ctx.fillStyle = fg;
+    ctx.fill();
+    ctx.strokeStyle = P.rim; ctx.lineWidth = 0.9; ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawPectoral(pts, t) {
+    const L = this.len;
+    const root = this._at(pts, 0.34), g = this.girth(0.34);
+    const rx = root.x - root.nx * g * 0.6;
+    const ry = root.y - root.ny * g * 0.6;
+    const flap = RM ? 0 :
+      Math.sin(TAU * CONFIG.strokeHz * 0.8 * t + this.phase) * 0.12;
+    ctx.save();
+    ctx.translate(rx, ry);
+    ctx.rotate(0.55 + flap);
+    const len = L * 0.19, wid = L * 0.055;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(len * 0.6, wid, len, wid * 0.3);
+    ctx.quadraticCurveTo(len * 0.7, -wid * 0.4, 0, -wid * 0.3);
+    ctx.closePath();
+    ctx.fillStyle = P.body;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  _drawBelly(pts) {
+    ctx.beginPath();
+    const from = 0.30, to = 0.80;
+    let first = true;
+    for (let s = from; s <= to; s += 0.05) {
+      const p = this._at(pts, s), g = this.girth(s);
+      const X = p.x - p.nx * g, Y = p.y - p.ny * g;
+      if (first) { ctx.moveTo(X, Y); first = false; } else ctx.lineTo(X, Y);
+    }
+    for (let s = to; s >= from; s -= 0.05) {
+      const p = this._at(pts, s), g = this.girth(s);
+      ctx.lineTo(p.x - p.nx * g * 0.15, p.y - p.ny * g * 0.15);
+    }
+    ctx.closePath();
+    const c0 = this._at(pts, 0.5);
+    const bg = ctx.createLinearGradient(c0.x, c0.y, c0.x, c0.y + this.len * 0.14);
+    bg.addColorStop(0, 'rgba(230,238,243,0)');
+    bg.addColorStop(1, P.white);
+    ctx.fillStyle = bg;
+    ctx.fill();
+  }
+
+  _drawEyePatch(pts) {
+    const p = this._at(pts, 0.13), g = this.girth(0.13);
+    const cx = p.x + p.nx * g * 0.25, cy = p.y + p.ny * g * 0.25;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(p.ang);
+    ctx.beginPath();
+    ctx.ellipse(-this.len * 0.02, -g * 0.35, this.len * 0.045, this.len * 0.022, 0, 0, TAU);
+    ctx.fillStyle = P.white;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(-this.len * 0.055, g * 0.02, this.len * 0.006, 0, TAU);
+    ctx.fillStyle = '#04080b';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  _drawSaddle(pts) {
+    const p = this._at(pts, 0.56), g = this.girth(0.56);
+    const cx = p.x + p.nx * g * 0.55, cy = p.y + p.ny * g * 0.55;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(p.ang);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.len * 0.05, this.len * 0.02, 0, 0, TAU);
+    ctx.fillStyle = P.saddle;
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* =====================================================================
+   DIVER — prone silhouette, back tank, mask, lagged flutter-kick leg
+   chain (thigh -> shin -> fin follow-through), periodic exhaust bubbles
+   =================================================================== */
+class Diver {
+  constructor() {
+    this.scale = rand(0.8, 1.0);
+    this.h = 88 * SIZ * this.scale;           // head-to-fin length px
+    this.dir = Math.random() < 0.5 ? 1 : -1;
+    this.speed = CONFIG.diverSpeed * rand(0.8, 1.25) * (RM ? 0.25 : 1);
+    this.x = rand(0, W);
+    this.baseY = rand(WATER_Y + H*0.08, WATER_Y + H*0.80);
+    this.y = this.baseY;
+    this.bobPh = rand(0, TAU);
+    this.kickPh = rand(0, TAU);
+    this.exhaleT = rand(1, 3);
+  }
+
+  update(dt, t) {
+    this.x += this.dir * this.speed * dt;
+    const m = this.h * 1.6;
+    if (this.dir > 0 && this.x - m > W) this.x = -m;
+    if (this.dir < 0 && this.x + m < 0) this.x = W + m;
+    this.y = this.baseY +
+      Math.sin(TAU * 0.045 * t + this.bobPh) * 8 * this.scale * (RM ? 0.3 : 1);
+    this.exhaleT -= dt;
+    if (this.exhaleT <= 0) {
+      this.exhaleT = rand(CONFIG.exhaleEvery[0], CONFIG.exhaleEvery[1]);
+      spawnExhale(this.x + this.dir * this.h * 0.44,
+                  this.y + this.h * 0.02, this.scale);
+    }
+  }
+
+  _legChain(t, phase) {
+    const u = this.h;
+    const k = RM ? 0.25 : 1;
+    const w = TAU * CONFIG.kickHz;
+    const a1 = 0.30 * k * Math.sin(w * t + phase);          // thigh swing
+    const a2 = 0.45 * k * Math.sin(w * t + phase - 0.55);   // shin lags
+    const a3 = 0.65 * k * Math.sin(w * t + phase - 1.0);    // fin lags more
+    const hip = { x: -0.14 * u, y: 0.02 * u };
+    const t1 = Math.PI + a1;
+    const knee = { x: hip.x + Math.cos(t1) * 0.22 * u,
+                   y: hip.y + Math.sin(t1) * 0.22 * u };
+    const t2 = t1 + a2 * 0.8;
+    const ank = { x: knee.x + Math.cos(t2) * 0.20 * u,
+                  y: knee.y + Math.sin(t2) * 0.20 * u };
+    const t3 = t2 + a3 * 0.9;
+    return { hip, knee, ank, t3 };
+  }
+
+  _drawLeg(leg) {
+    const u = this.h;
+    ctx.strokeStyle = P.body;
+    ctx.lineWidth = 0.055 * u;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(leg.hip.x, leg.hip.y);
+    ctx.lineTo(leg.knee.x, leg.knee.y);
+    ctx.lineTo(leg.ank.x, leg.ank.y);
+    ctx.stroke();
+    // fin blade (flexes via t3)
+    ctx.save();
+    ctx.translate(leg.ank.x, leg.ank.y);
+    ctx.rotate(leg.t3);
+    ctx.beginPath();
+    ctx.moveTo(0, -0.022 * u);
+    ctx.quadraticCurveTo(0.10 * u, -0.032 * u, 0.17 * u, -0.012 * u);
+    ctx.lineTo(0.17 * u, 0.012 * u);
+    ctx.quadraticCurveTo(0.10 * u, 0.032 * u, 0, 0.022 * u);
+    ctx.closePath();
+    ctx.fillStyle = P.body;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  draw(t) {
+    const sy = this.y - camY;
+    if (sy < -this.h * 1.5 || sy > H + this.h * 1.5) return;
+    const u = this.h;
+    const depthFrac = clamp((this.baseY - WATER_Y) / (WORLD_H - WATER_Y), 0, 1);
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(this.dir, 1);
+    // slight pitch reaction to the kick
+    ctx.rotate(Math.sin(TAU * CONFIG.kickHz * t + this.kickPh) * (RM ? 0 : 0.035));
+    ctx.globalAlpha = lerp(1, 0.7, depthFrac);
+    const ga = ctx.globalAlpha;
+
+    // far leg (dimmed, opposite kick phase)
+    ctx.globalAlpha = ga * 0.6;
+    this._drawLeg(this._legChain(t, this.kickPh + Math.PI));
+    ctx.globalAlpha = ga;
+
+    // tank on the back (top side when prone)
+    ctx.fillStyle = P.tank;
+    ctx.beginPath();
+    ctx.ellipse(-0.02 * u, -0.145 * u, 0.16 * u, 0.048 * u, 0, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();                                  // valve
+    ctx.arc(0.15 * u, -0.145 * u, 0.018 * u, 0, TAU);
+    ctx.fillStyle = P.rim;
+    ctx.fill();
+
+    // torso
+    ctx.fillStyle = P.body;
+    ctx.beginPath();
+    ctx.ellipse(0.05 * u, 0, 0.26 * u, 0.10 * u, 0, 0, TAU);
+    ctx.fill();
+
+    // head + hood
+    ctx.beginPath();
+    ctx.arc(0.40 * u, -0.01 * u, 0.085 * u, 0, TAU);
+    ctx.fill();
+    // mask faceplate + glint
+    ctx.beginPath();
+    ctx.ellipse(0.455 * u, -0.02 * u, 0.035 * u, 0.045 * u, 0, 0, TAU);
+    ctx.fillStyle = 'rgba(230,238,243,0.85)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0.462 * u, -0.032 * u, 0.010 * u, 0, TAU);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fill();
+
+    // visible arm, relaxed forward-down
+    ctx.strokeStyle = P.body;
+    ctx.lineWidth = 0.045 * u;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0.24 * u, 0.03 * u);
+    ctx.quadraticCurveTo(0.34 * u, 0.10 * u, 0.42 * u, 0.16 * u);
+    ctx.stroke();
+
+    // near leg
+    this._drawLeg(this._legChain(t, this.kickPh));
+
+    // rim light along the back
+    ctx.strokeStyle = P.rim;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0.05 * u, 0, 0.26 * u, 0.10 * u, 0, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+/* ---- scene build ---- */
+let pod = [], divers = [];
+function buildPod() {
+  pod = [];
+  for (let i = 0; i < CONFIG.podSize; i++) pod.push(new Orca(i, CONFIG.podSize));
+  pod.sort((a, b) => b.depth - a.depth);   // far first
+}
+function buildDivers() {
+  divers = [];
+  for (let i = 0; i < CONFIG.diverCount; i++) divers.push(new Diver());
+}
+
+/* guarantee at least one orca OR diver (random pick) inside the first view */
+function ensureInitialSighting() {
+  const bandTop = WATER_Y + H * 0.08;   // top of usable water at scroll 0
+  const bandBot = H - 40;               // bottom of the scroll-0 viewport
+  if (bandBot - bandTop < 60) return;
+  const useOrca = divers.length === 0 || Math.random() < 0.5;
+  if (useOrca && pod.length) {
+    const o = pod[Math.floor(Math.random() * pod.length)];
+    const m = o.len * 0.25;
+    const lo = Math.min(bandTop + m, bandBot - m - 1);
+    o.baseY = rand(lo, Math.max(lo + 1, bandBot - m));
+    o.y = o.baseY;
+    o.x = rand(o.len * 0.6, W - o.len * 0.6);
+  } else if (divers.length) {
+    const d = divers[Math.floor(Math.random() * divers.length)];
+    d.baseY = clamp(rand(bandTop + 30, bandBot - 30),
+                    WATER_Y + H * 0.08, WATER_Y + H * 0.80);
+    d.y = d.baseY;
+    d.x = rand(d.h, W - d.h);
+  }
+}
+
+function _orqaCam(){ var b=document.body.classList; return (b.contains('dived')||b.contains('immersive')) ? MAX_SCROLL : 0; }
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  lastW = W; lastH = H;
+  SIZ = clamp(W / 620, 0.55, 1);   // shrink creatures on narrow (mobile) screens
+  cv.width = Math.floor(W * DPR);
+  cv.height = Math.floor(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  WORLD_H = Math.round(CONFIG.worldVh * H);
+  WATER_Y = Math.round(CONFIG.waterVh * H);
+  MAX_SCROLL = WORLD_H - H;
+  if (spacer) spacer.style.height = WORLD_H + 'px';
+  buildGradients();
+  initClouds();
+  layoutRays();
+  initAmbient();
+  buildPod();
+  buildDivers();
+  ensureInitialSighting();
+  drops = []; ringsFx = []; exh = [];
+  camTarget = _orqaCam();
+  camY = camTarget;
+}
+// Rebuild only on meaningful viewport changes. Mobile browsers fire resize
+// continuously as the URL bar shows/hides while scrolling; rebuilding the
+// scene on that jitter causes visible pops, so height deltas <150px are ignored.
+window.addEventListener('resize', () => {
+  if (lastW === 0 || window.innerWidth !== lastW ||
+      Math.abs(window.innerHeight - lastH) > 150) resize();
+});
+
+/* ---- input: click near the surface -> nearest cruising orca breaches ---- */
+window.addEventListener('click', (e) => {
+  const b = document.body.classList;
+  if (b.contains('panel-open') || b.contains('immersive')) return;
+  const ag = document.getElementById('authGate'); if (ag && getComputedStyle(ag).display !== 'none') return;
+  if (e.target && e.target.closest && e.target.closest('button,input,select,textarea,a,label,.tab,.chip,.glass,.gl,.evJoin,.showBtn,.djToggle,.swatches,[data-devcmd],#logBtn,#bottleChip,#celestial,#bell,#freed,#authGate')) return;
+  const wx = e.clientX;
+  const wy = e.clientY + camY;
+  if (wy > WATER_Y + H * CONFIG.breachZoneVh) return;
+  let best = null, bd = Infinity;
+  for (const o of pod) { if (o.state !== 'cruise') continue;
+    const d = (o.x - wx)*(o.x-wx) + (o.y-wy)*(o.y-wy); if (d < bd) { bd = d; best = o; } }
+  if (best) best.breach(wx);
+});
+
+/* ---- surface foam ---- */
+function drawFoam(t) {
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = P.foam + '0.85)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let x = -40; x <= W + 40; x += 24) {
+    const y = surfaceY(x, t);
+    if (x === -40) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = P.foam + '0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = -40; x <= W + 40; x += 24) {
+    const y = surfaceY(x, t) + 7;
+    if (x === -40) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+/* ---- main loop ---- */
+let last = performance.now();
+let running = true;
+document.addEventListener('visibilitychange', () => {
+  running = !document.hidden;
+  if (running) { last = performance.now(); requestAnimationFrame(loop); }
+});
+
+function loop(now) {
+  if (!running) return;
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  const t = now / 1000;
+  tNow = t;
+
+  camTarget = _orqaCam();
+  camY += (camTarget - camY) * (1 - Math.exp(-7 * dt));
+
+  ctx.fillStyle = P.abyss;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(0, -camY);
+
+  const skyVisible = camY < WATER_Y + 60;
+  if (skyVisible) {
+    stepClouds(dt);
+    drawLand();
+  }
+
+  // water body with animated wavy top
+  ctx.beginPath();
+  for (let x = -40; x <= W + 40; x += 24) {
+    const y = surfaceY(x, t);
+    if (x === -40) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W + 40, WORLD_H + 40);
+  ctx.lineTo(-40, WORLD_H + 40);
+  ctx.closePath();
+  ctx.fillStyle = waterGrad;
+  ctx.fill();
+
+  // sub-surface glow
+  if (camY < WATER_Y + 150) {
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, WATER_Y - 6, W, 105);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  drawRays(t);
+
+  for (const d of divers) { d.update(dt, t); d.draw(t); }
+  for (const o of pod)    { o.update(dt, t); o.draw(t); }
+
+  stepSplash(dt);
+  drawSplash();
+  stepDrawExhale(dt, t);
+  drawAmbient(dt, t);
+
+  if (skyVisible) drawFoam(t);
+
+  ctx.restore();
+
+  requestAnimationFrame(loop);
+}
+
+resize();
+requestAnimationFrame(loop);
+try{ var _ld=document.getElementById('loader'); if(_ld) _ld.classList.add('hide'); }catch(e){}
 </script>
 </body>
 </html>
