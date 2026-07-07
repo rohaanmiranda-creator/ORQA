@@ -586,6 +586,8 @@
   .dpBtns { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .dpBtns .chip { cursor:pointer; }
   .dpv.ok { color:#7ff0e4; } .dpv.off { color:#ff8f8f; }
+  /* role-gate: the developer pod panel is visible only to service/admin/superadmin */
+  body[data-role="user"] #devPodSec, body[data-role="guest"] #devPodSec { display:none; }
   .devRow { display:flex; align-items:center; gap:10px; margin:9px 0; font-size:12px; color:#bfe6f0; }
   .devRow span:first-child { width:48px; }
   .devRow input[type=range] { flex:1; accent-color:#46e0d2; }
@@ -1724,7 +1726,7 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       </div></div>
     <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Tare / zero scale — <b>empty the bottle first</b></div><span class="evJoin" id="btare">Tare now</span></div></div>
   <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">🛠 DEVELOPER · POD CONNECTION</div>
+  <div class="insSec" id="devPodSec"><div class="lbl">🛠 DEVELOPER · POD CONNECTION</div>
     <div class="bsub">Live BLE diagnostics + command test — for hardware bring-up.</div>
     <div class="bstats" style="margin-top:6px">
       <div class="brow"><span>Web Bluetooth</span><b id="dpBt">—</b></div>
@@ -3530,72 +3532,107 @@ window.__marineReady=true;   // safe to run stepMarineAll now that MREADY exists
 // cross-device sync. Leave blank to stay device-local (no login wall). The whole
 // thing rides the ORQA.store seam — no other code changes. RLS in db/schema.sql is
 // what protects each user's data (the anon key is public by design).
-const ORQA_CFG = { supabaseUrl: '', supabaseAnonKey: '' };
+const ORQA_CFG = { supabaseUrl: '', supabaseAnonKey: '', localAuth: true };
+// Local/dev test accounts — for exercising the auth gate + roles during beta.
+// WARNING: these are CLIENT-SIDE only and NOT secure (credentials live in this file and
+// role checks run in the browser); they exist purely to test the role experience. Real
+// security comes with the Supabase backend — map these emails to real users + a role in
+// user_metadata (or a roles table) when you go live. Set localAuth:false to drop the gate.
+const ORQA_ACCOUNTS = [
+  { email:'superadmin@orqa.app', password:'super1234',   role:'superadmin', name:'Super Admin' },
+  { email:'admin@orqa.app',      password:'admin1234',   role:'admin',      name:'Admin' },
+  { email:'service@orqa.app',    password:'service1234', role:'service',    name:'Service' },
+  { email:'tester@orqa.app',     password:'test1234',    role:'user',       name:'Beta Tester' }
+];
+const ORQA_ROLE_RANK = { guest:0, user:1, service:2, admin:3, superadmin:4 };
 ORQA.auth = (function(){
   const cfg = ORQA_CFG;
-  const enabled = () => !!(cfg.supabaseUrl && cfg.supabaseAnonKey);
+  const supaEnabled  = () => !!(cfg.supabaseUrl && cfg.supabaseAnonKey);
+  const localEnabled = () => !!cfg.localAuth || /(?:^|[?&])auth=1(?:&|$)/.test(location.search);
   let sb=null, gateEl=null, pending={}, pushT=null;
+  const LS='orqaAuth';
+
+  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role); }
 
   function buildGate(){
     if(gateEl) return gateEl;
     const g=document.createElement('div'); g.id='authGate';
     g.innerHTML = '<div class="agCard">'
       + '<div class="agBrand">ORQA</div>'
-      + '<div class="agSub">Sign in to sync your hydration across devices</div>'
-      + '<input id="agEmail" type="email" placeholder="you@email.com" autocomplete="email">'
+      + '<div class="agSub">Sign in to continue</div>'
+      + '<input id="agEmail" type="email" placeholder="email" autocomplete="email">'
       + '<input id="agPass" type="password" placeholder="password" autocomplete="current-password">'
       + '<div id="agErr" class="agErr"></div>'
       + '<button id="agSignIn" class="agBtn primary">Sign in</button>'
       + '<button id="agSignUp" class="agBtn">Create account</button>'
-      + '<button id="agGuest" class="agGhost">Continue without an account (this device only)</button>'
+      + '<button id="agGuest" class="agGhost">Continue as guest (this device only)</button>'
       + '</div>';
     document.body.appendChild(g); gateEl=g;
     const $=id=>g.querySelector('#'+id), err=m=>{ $('agErr').textContent=m||''; };
     const busy=on=>g.querySelector('.agCard').classList.toggle('agBusy', on);
-    const creds=()=>({ email:($('agEmail').value||'').trim(), password:$('agPass').value||'' });
+    const creds=()=>({ email:($('agEmail').value||'').trim().toLowerCase(), password:$('agPass').value||'' });
     $('agSignIn').onclick=async()=>{ const c=creds(); if(!c.email||!c.password) return err('Enter email + password');
-      busy(true); err(''); try{ const {error}=await sb.auth.signInWithPassword(c); if(error) err(error.message); }catch(e){ err(e.message); } finally{ busy(false); } };
-    $('agSignUp').onclick=async()=>{ const c=creds(); if(!c.email||!c.password) return err('Enter email + password');
-      busy(true); err(''); try{ const {error}=await sb.auth.signUp(c); if(error) err(error.message); else err('Check your email to confirm, then sign in.'); }catch(e){ err(e.message); } finally{ busy(false); } };
-    $('agGuest').onclick=()=>hideGate();   // stay local-only on this device
+      busy(true); err('');
+      try{
+        if(supaEnabled()){ const {error}=await sb.auth.signInWithPassword(c); if(error) err(error.message); }
+        else { const a=ORQA_ACCOUNTS.find(x=>x.email===c.email && x.password===c.password);
+          if(a) localSignIn(a); else err('Invalid credentials'); }
+      }catch(e){ err(e.message); } finally{ busy(false); } };
+    $('agSignUp').onclick=async()=>{ const c=creds();
+      if(supaEnabled()){ if(!c.email||!c.password) return err('Enter email + password');
+        busy(true); err(''); try{ const {error}=await sb.auth.signUp(c); if(error) err(error.message); else err('Check your email to confirm, then sign in.'); }catch(e){ err(e.message); } finally{ busy(false); } }
+      else err('Accounts are provisioned by an admin in test mode.'); };
+    $('agGuest').onclick=()=>{ applyRole({ email:'guest', role:'guest', name:'Guest' }); hideGate(); };
     return g;
   }
   function showGate(){ buildGate().style.display='flex'; }
   function hideGate(){ if(gateEl) gateEl.style.display='none'; }
 
+  function localSignIn(a){ const u={ email:a.email, role:a.role, name:a.name };
+    try{ localStorage.setItem(LS, JSON.stringify(u)); }catch(e){}
+    applyRole(u); hideGate();
+    try{ updateHome(); refreshHomeStats(); refreshBottleChip(); }catch(e){} }
+
+  // ---- Supabase cloud-sync path ----
   function queuePush(k,v){ pending[k]=v; clearTimeout(pushT); pushT=setTimeout(flush, 900); }
   async function flush(){ if(!sb) return; const { data:{ user } } = await sb.auth.getUser(); if(!user) return;
     const rows=Object.entries(pending).map(([k,v])=>({ user_id:user.id, k, v, updated_at:new Date().toISOString() })); pending={};
     if(rows.length) try{ await sb.from('app_state').upsert(rows, { onConflict:'user_id,k' }); }catch(e){ console.warn('[sync] push failed', e); } }
-  function makeAdapter(seed){
-    const cache=Object.assign({}, seed||{});
-    return { name:'supabase',
-      getItem:k=> (k in cache) ? cache[k] : null,
-      setItem:(k,v)=>{ cache[k]=v; queuePush(k,v); },
-      removeItem:k=>{ delete cache[k]; queuePush(k, null); } };
-  }
-  async function afterAuth(user){
-    hideGate(); let seed={};
-    try{ const { data } = await sb.from('app_state').select('k,v').eq('user_id', user.id); (data||[]).forEach(r=>seed[r.k]=r.v); }
-    catch(e){ console.warn('[sync] pull failed', e); }
-    ORQA.store.use(makeAdapter(seed)); ORQA.store.user=user;
-    try{ loadPersisted(true); updateHome(); refreshHomeStats(); refreshBottleChip(); }catch(e){ console.warn(e); }
-  }
+  function makeAdapter(seed){ const cache=Object.assign({}, seed||{});
+    return { name:'supabase', getItem:k=>(k in cache)?cache[k]:null, setItem:(k,v)=>{ cache[k]=v; queuePush(k,v); }, removeItem:k=>{ delete cache[k]; queuePush(k,null); } }; }
+  async function afterSupaAuth(user){ hideGate(); let seed={};
+    try{ const { data } = await sb.from('app_state').select('k,v').eq('user_id', user.id); (data||[]).forEach(r=>seed[r.k]=r.v); }catch(e){ console.warn('[sync] pull failed', e); }
+    ORQA.store.use(makeAdapter(seed));
+    applyRole({ email:user.email, role:(user.user_metadata&&user.user_metadata.role)||'user', name:user.email });
+    try{ loadPersisted(true); updateHome(); refreshHomeStats(); refreshBottleChip(); }catch(e){ console.warn(e); } }
+
   async function init(){
-    if(!enabled()) return;                         // no backend configured -> stay local, no gate
-    try{
-      const mod = await import('https://esm.sh/@supabase/supabase-js@2');
-      sb = mod.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); ORQA.sb=sb;
-      const { data:{ session } } = await sb.auth.getSession();
-      if(session && session.user) afterAuth(session.user); else showGate();
-      sb.auth.onAuthStateChange((_e,se)=>{ if(se && se.user) afterAuth(se.user); });
-    }catch(e){ console.warn('[auth] init failed — staying local', e); }
+    if(supaEnabled()){
+      try{ const mod=await import('https://esm.sh/@supabase/supabase-js@2');
+        sb=mod.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); ORQA.sb=sb;
+        const { data:{ session } }=await sb.auth.getSession();
+        if(session&&session.user) afterSupaAuth(session.user); else showGate();
+        sb.auth.onAuthStateChange((_e,se)=>{ if(se&&se.user) afterSupaAuth(se.user); });
+      }catch(e){ console.warn('[auth] supabase init failed', e); showGate(); }
+      return;
+    }
+    if(localEnabled()){
+      let s=null; try{ s=JSON.parse(localStorage.getItem(LS)||'null'); }catch(e){}
+      if(s&&s.role) applyRole(s); else showGate();
+      return;
+    }
+    applyRole({ email:'local', role:'superadmin', name:'Local' });   // auth off -> full local access (dev tools visible)
   }
-  // test hook: render the gate UI without a backend (verification only)
-  function _renderGateForTest(){ buildGate(); showGate(); return { overlay:!!document.getElementById('authGate'),
-    inputs:document.querySelectorAll('#authGate input').length, buttons:document.querySelectorAll('#authGate button').length }; }
-  return { init, enabled, _renderGateForTest,
-    signOut: async()=>{ try{ if(sb) await sb.auth.signOut(); }catch(e){} location.reload(); } };
+
+  const api = {
+    init, supaEnabled, localEnabled, user:null, role:'guest',
+    can:(min)=> (ORQA_ROLE_RANK[api.role]||0) >= (ORQA_ROLE_RANK[min]||99),
+    isPrivileged:()=> (ORQA_ROLE_RANK[api.role]||0) >= ORQA_ROLE_RANK.service,
+    accounts:()=> ORQA_ACCOUNTS.map(a=>({ email:a.email, role:a.role, name:a.name })),
+    signOut: async()=>{ try{ localStorage.removeItem(LS); }catch(e){} try{ if(sb) await sb.auth.signOut(); }catch(e){} location.reload(); },
+    _renderGateForTest:()=>{ buildGate(); showGate(); return { overlay:!!document.getElementById('authGate'), inputs:document.querySelectorAll('#authGate input').length, buttons:document.querySelectorAll('#authGate button').length }; }
+  };
+  return api;
 })();
 try{ ORQA.auth.init(); }catch(e){ console.warn('[auth]', e); }
 </script>
