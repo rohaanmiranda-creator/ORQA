@@ -1002,7 +1002,7 @@ const BASE_PITCH = 0.06, BASE_YAW = -0.40;
 const sceneEl = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
@@ -1012,7 +1012,7 @@ sceneEl.appendChild(renderer.domElement);
 // During a breach it renders ONLY the orca, so the jump genuinely leaves the water
 // into the air instead of being clipped at the water/sky boundary.
 const airR = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-airR.setPixelRatio(Math.min(devicePixelRatio, 2));
+airR.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 airR.setSize(innerWidth, innerHeight);
 airR.outputColorSpace = THREE.SRGBColorSpace;
 airR.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1126,7 +1126,7 @@ function prepGeometry(root){ root.updateMatrixWorld(true); let g=null; root.trav
 const CREATURES=[], passers=[];
 new FBXLoader().load('assets/shark.fbx', o=>{ const g=prepGeometry(o); if(g) CREATURES.push({geom:g,scl:2.6}); }, undefined, e=>showErr('shark: '+(e.message||e)));
 new FBXLoader().load('assets/ray.fbx', o=>{ const g=prepGeometry(o); if(g) CREATURES.push({geom:g,scl:2.0}); }, undefined, e=>showErr('ray: '+(e.message||e)));
-function spawnCreature(){ if(window.__marineReady && typeof spawnAnyMarine==='function'){ const pol=(typeof oceanPolicy==='function')?oceanPolicy():{species:'all',marineCap:9}; if(pol.marineCap>0 && marineCount()<pol.marineCap) spawnAnyMarine(); return; }   // clear textured+animated creatures replace the old silhouettes
+function spawnCreature(){ if(window.__marineReady && typeof spawnAnyMarine==='function'){ const pol=(typeof oceanPolicy==='function')?oceanPolicy():{species:'all',marineCap:6}; if(pol.marineCap>0 && marineCount()<pol.marineCap) spawnAnyMarine(); return; }   // clear textured+animated creatures replace the old silhouettes
   if(!CREATURES.length) return; const c=CREATURES[Math.floor(Math.random()*CREATURES.length)];
   const goRight=Math.random()<0.5; const sc=c.scl*(0.7+Math.random()*0.7); const depth=-3-Math.random()*9; const yy=(Math.random()-0.5)*halfH*0.95;
   const mesh=new THREE.Mesh(c.geom, new THREE.MeshLambertMaterial({ color:0x2a6f86, emissive:0x06222e, fog:true, transparent:true, opacity:0.55+Math.random()*0.3 }));
@@ -1362,7 +1362,7 @@ window.__hunt=(x,y)=>{ if(fish){ fishTarget.set(x,y); fishHunt=true; fishPressed
 const clock=new THREE.Clock();
 function animate(){
   requestAnimationFrame(animate);
-  const dt=Math.min(0.05, clock.getDelta()); const t=clock.elapsedTime; window.__f=(window.__f||0)+1;
+  const dt=Math.min(0.1, clock.getDelta()); const t=clock.elapsedTime; window.__f=(window.__f||0)+1;
   if(document.body.classList.contains('panel-open')&&!document.body.classList.contains('immersive')){ window.__pa=(window.__pa||0)+dt; if(window.__pa<0.1){ return; } window.__pa=0; } else { window.__pa=0; }
 
   stepFish(dt);
@@ -1462,8 +1462,8 @@ function placeSkyOrb(){ const p=ORB_POS[todIdx]||ORB_POS[0]; if(SKY.skyEl){ SKY.
 placeSkyOrb(); window.__placeSkyOrb=placeSkyOrb;
 function stepSkyLife(now){
   requestAnimationFrame(stepSkyLife);
-  const dt=Math.min(0.05, ((now-(stepSkyLife._t||now))/1000)||0); stepSkyLife._t=now;
-  if(skyHidden()) return;
+  if(skyHidden()){ stepSkyLife._t=now; return; }
+  if(now-(stepSkyLife._acc||0) < 33) return; const dt=Math.min(0.1, ((now-(stepSkyLife._t||now))/1000)||0); stepSkyLife._t=now; stepSkyLife._acc=now;
   const T=(now||0)/1000;
   for(const c of SKY.clouds){ let x=parseFloat(c.dataset.x)+parseFloat(c.dataset.spd)*7.2*dt; if(x>120) x=-30; c.dataset.x=x;
     const ph=parseFloat(c.dataset.ph||0), sc=parseFloat(c.dataset.sc);
@@ -1902,9 +1902,37 @@ const num=(v,d)=>{const n=+v; return isFinite(n)?n:d;};   // NaN-safe: keep last
 //  routes through here, so flipping a switch off is guaranteed to silence that
 //  channel everywhere — no stray buzz, glow, or beep can leak through.
 // ════════════════════════════════════════════════════════════════════════
+// ══════════════ DATA LAYER — backend-ready seam ══════════════
+// Every read/write of persisted user data flows through ORQA.store. Today the
+// backend is device-local (localStorage). To add accounts + cloud sync later,
+// implement an adapter with the same {getItem,setItem,removeItem} shape (plus the
+// async signIn/pull/push hooks) and call ORQA.store.use(adapter) after login — NO
+// changes needed at any save/load call-site. ORQA.store.onWrite(fn) lets a cloud
+// adapter mirror every local write upstream without touching this file's logic.
+const ORQA = (window.ORQA = window.ORQA || {});
+ORQA.store = (function(){
+  let backend = { name:'local',
+    getItem:k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+    setItem:(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){} },
+    removeItem:k=>{ try{ localStorage.removeItem(k); }catch(e){} } };
+  const subs=[];
+  return {
+    get name(){ return backend.name; },
+    getItem:k=>backend.getItem(k),
+    setItem:(k,v)=>{ backend.setItem(k,v); for(const f of subs){ try{ f(k,v); }catch(e){} } },
+    removeItem:k=>backend.removeItem(k),
+    onWrite:f=>subs.push(f),          // cloud adapter: mirror local writes upstream
+    use:adapter=>{ backend=adapter; },// swap in an account/cloud backend after auth
+    user:null,                        // filled by a backend after login
+    async signIn(){ return null; },   // no-op until a backend is chosen
+    async signOut(){ this.user=null; },
+    async pull(){ return null; },     // backend: fetch server state
+    async push(_s){ }                 // backend: upsert server state
+  };
+})();
 const FX = { rgb:true, vibe:true, sound:true };
-try{ const s=JSON.parse(localStorage.getItem('orqaFX')||'null'); if(s){ FX.rgb=s.rgb!==false; FX.vibe=s.vibe!==false; FX.sound=s.sound!==false; } }catch(e){}
-function fxSave(){ try{ localStorage.setItem('orqaFX', JSON.stringify(FX)); }catch(e){} }
+try{ const s=JSON.parse(ORQA.store.getItem('orqaFX')||'null'); if(s){ FX.rgb=s.rgb!==false; FX.vibe=s.vibe!==false; FX.sound=s.sound!==false; } }catch(e){}
+function fxSave(){ try{ ORQA.store.setItem('orqaFX', JSON.stringify(FX)); }catch(e){} }
 
 // ---- audio: one shared context, unlocked on first gesture (autoplay policy) ----
 let _fxAC=null;
@@ -2570,7 +2598,7 @@ let _stDate=new Date().toDateString();
 let _saveT=null;
 function saveState(){ if(POD.mock) return;           // demo mutations must never overwrite the real day
   clearTimeout(_saveT); _saveT=setTimeout(()=>{ try{
-    localStorage.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
+    ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
       hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
       lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
       sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
@@ -2584,7 +2612,7 @@ function archiveDay(dateStr, hs, sipCount){ DAYHIST.unshift({ date:dateStr, inta
 function loadPersisted(reset){ try{
   if(reset){ HS.intake=0; HS.freed=0; HS.donated=0; HS.wasted=0; HS._goalHit=false; HS._met=false;
     SIPLOG.length=0; REFILLLOG.length=0; DISPOSELOG.length=0; lastSipAt=null; POD._sync=null; }
-  const s=JSON.parse(localStorage.getItem(ST_KEY)||'null'); if(!s||s.v!==1) return;
+  const s=JSON.parse(ORQA.store.getItem(ST_KEY)||'null'); if(!s||s.v!==1) return;
   if(!DAYHIST.length) (s.hist||[]).forEach(h=>DAYHIST.push(h));
   const h=s.hs||{}; HS.goal=h.goal||HS.goal;
   if(s.date!==_stDate){                              // app last ran on a previous day → archive it, start today fresh
