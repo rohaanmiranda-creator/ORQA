@@ -34,6 +34,15 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass orqatest -keypass orqatest \
             -dname "CN=ORQA Test, O=ORQA, L=NA, S=NA, C=IN"
+      - name: Work around Bubblewrap SDK path check (legacy 'tools' dir)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "SDK=$SDK"; ls -la "$SDK"
+          # modern runners ship cmdline-tools/ but not the legacy tools/ that Bubblewrap validates
+          if [ ! -e "$SDK/tools" ]; then sudo ln -sfn "$SDK/cmdline-tools/latest" "$SDK/tools"; fi
+          ls -la "$SDK/tools/bin" | head
+          echo "---- how Bubblewrap validates the SDK (for reference) ----"
+          grep -rn "isn't correct" "$(npm root -g)/@bubblewrap" 2>/dev/null | head || true
       - name: Build TWA APK
         env:
           BUBBLEWRAP_KEYSTORE_PASSWORD: orqatest
