@@ -123,6 +123,25 @@
   #ocean { position:fixed; inset:0; width:100vw; height:100vh; z-index:0; display:block; }
   #scene canvas { display:block; }
 
+  /* ---- surface-UI theme tokens: dark ink over the bright DAY sky, light ink over the darker skies.
+         One override block per non-day time-of-day flips the whole hero. ---- */
+  :root{
+    --hInk:#083140; --hInk2:#1d5a74; --hAcc:#0a8478; --hAccT:#044a43;
+    --rTrk:rgba(6,42,58,.24); --rTrkI:rgba(6,42,58,.16); --rGh:rgba(12,116,106,.85);
+    --hHalo:0 1px 2px rgba(255,255,255,.5);
+    --brandInk:#0a3a4d; --brandHalo:0 1px 2px rgba(255,255,255,.6),0 2px 14px rgba(255,255,255,.35);
+  }
+  body.tod-night{   /* only true night is dark enough to need light ink; sunset/sunrise stay bright -> dark ink */
+    --hInk:#f3fbff; --hInk2:#e6f4f9; --hAcc:#5ff0e6; --hAccT:#9df6ec;
+    --rTrk:rgba(255,255,255,.16); --rTrkI:rgba(160,245,238,.09); --rGh:rgba(178,250,242,.75);
+    --hHalo:0 1px 3px rgba(0,15,28,.75);
+    --brandInk:#eafcff; --brandHalo:0 2px 18px rgba(0,12,24,.6);
+  }
+  #hring .rtk  { stroke:var(--rTrk); }
+  #hring .rtkI { stroke:var(--rTrkI); }
+  #hring #rProg  { stroke:var(--hAcc); }
+  #hring #rGhost { stroke:var(--rGh); }
+
 
   .ripple { position:fixed; z-index:4; width:18px; height:18px; border-radius:50%; pointer-events:none;
     border:2px solid rgba(180,255,245,.85); transform:translate(-50%,-50%); animation:rip .7s ease-out forwards; }
@@ -154,9 +173,9 @@
   #authGate .agGhost { width:100%; margin-top:6px; padding:8px; font-size:12px; color:#9fd9e6; background:none; border:none; cursor:pointer; text-decoration:underline; }
   #authGate .agBusy { opacity:.6; pointer-events:none; }
   #brand { position:fixed; z-index:5; top:22px; left:0; right:0; text-align:center; pointer-events:none;
-    color:#0a3a4d; letter-spacing:.42em; font-size:15px; font-weight:400; text-indent:.42em; text-shadow:0 1px 2px rgba(255,255,255,.6), 0 2px 14px rgba(255,255,255,.35); }
+    color:var(--brandInk); letter-spacing:.42em; font-size:15px; font-weight:400; text-indent:.42em; text-shadow:var(--brandHalo); }
   body.dived #brand { color:#eafcff; font-weight:300; text-shadow:0 2px 24px rgba(0,0,0,.55); }   /* light again over the dark abyss */
-  #tag { display:block; margin-top:7px; font-size:10px; letter-spacing:.30em; color:#1d5a74; opacity:.92; }
+  #tag { display:block; margin-top:7px; font-size:10px; letter-spacing:.30em; color:var(--hInk2); opacity:.92; }
   #hint { position:fixed; z-index:5; top:90px; left:0; right:0; text-align:center; pointer-events:none;
     color:#bfe6f0; font-size:11px; letter-spacing:.06em; opacity:.7; }
 
@@ -186,7 +205,7 @@
   /* ===== Home dashboard ===== */
   #hint, .controls { display:none; }
   #app > * { pointer-events:auto; }
-  .gl { background:rgba(7,23,36,.70); border:1px solid rgba(255,255,255,.18);
+  .gl { background:rgba(10,40,55,.75); border:1px solid rgba(150,210,225,.22);
     -webkit-backdrop-filter:blur(20px) saturate(150%); backdrop-filter:blur(20px) saturate(150%); box-shadow:0 8px 30px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.18); }
   #bottleChip { position:fixed; top:58px; left:18px; z-index:7; display:flex; align-items:center; gap:9px; padding:8px 12px; border-radius:15px; font-size:12px; color:#eafcff; }
   #bottleChip .lvl { width:9px; height:26px; border-radius:3px; border:1px solid rgba(255,255,255,.25);
@@ -401,7 +420,7 @@
   #hero .hVol { font-size:44px; font-weight:300; line-height:1; }
   #hero .hVol b { font-weight:500; }
   #hero .hVol small { font-size:18px; color:#bfe6f0; font-weight:400; }
-  #hero .hGoal { font-size:13px; color:#1d5a74; margin-top:8px; }
+  #hero .hGoal { font-size:13px; color:var(--hInk2); margin-top:8px; text-shadow:var(--hHalo); }
   #hero .hPace { display:inline-block; margin-top:11px; font-size:12px; font-weight:600; padding:6px 15px; border-radius:20px; background:rgba(12,150,136,.92); color:#ffffff; box-shadow:0 3px 12px rgba(6,40,45,.22); }
   #quickStats { position:fixed; top:24%; left:0; right:0; z-index:7; display:flex; gap:10px; justify-content:center; }
   #quickStats .qs { padding:8px 15px; border-radius:14px; text-align:center; color:#eafcff; min-width:78px; }
@@ -423,15 +442,15 @@
   #hring { position:relative; width:150px; height:150px; margin:0 auto 6px; cursor:pointer; pointer-events:auto; }
   #hring svg { display:block; width:150px; height:150px; }
   #hring .hcenter { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
-  #hring .hcenter b { font-size:37px; font-weight:400; line-height:1; color:#083140; }
-  #hring .hcenter small { font-size:10px; color:#1d5a74; letter-spacing:.08em; margin-top:4px; }
-  #hring .hcenter #ringPct { font-size:12px; font-weight:600; color:#06635a; margin-top:6px; letter-spacing:.1em; }
+  #hring .hcenter b { font-size:37px; font-weight:400; line-height:1; color:var(--hInk); text-shadow:var(--hHalo); }
+  #hring .hcenter small { font-size:10px; color:var(--hInk2); letter-spacing:.08em; margin-top:4px; text-shadow:var(--hHalo); }
+  #hring .hcenter #ringPct { font-size:12px; font-weight:600; color:var(--hAccT); margin-top:6px; letter-spacing:.1em; text-shadow:var(--hHalo); }
   #rProg { filter:drop-shadow(0 0 6px rgba(70,224,210,.5)); }
   #rGhost { filter:drop-shadow(0 0 6px rgba(150,245,238,.7)); }
-  .hlegend { display:flex; gap:18px; justify-content:center; margin-top:6px; font-size:11px; color:#1d5a74; }
+  .hlegend { display:flex; gap:18px; justify-content:center; margin-top:6px; font-size:11px; color:var(--hInk2); text-shadow:var(--hHalo); }
   .hlegend i { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:7px; vertical-align:middle; }
-  .hlegend span i[style] { background:#0a8478 !important; }   /* 'you' swatch — deep teal reads on the light sky */
-  .hlegend i.gh { background:rgba(11,132,120,.75); box-shadow:0 0 6px rgba(11,132,120,.5); }
+  .hlegend span i[style] { background:var(--hAcc) !important; }   /* 'you' swatch — tracks the accent per time-of-day */
+  .hlegend i.gh { background:var(--rGh); box-shadow:0 0 6px var(--rGh); }
   #hero .hGoal { margin-top:7px; }
   #quickStats { top:39%; }
   #ringPop { position:fixed; top:26%; left:50%; transform:translate(-50%,-6px); z-index:9; padding:14px 20px; border-radius:16px; font-size:13px; line-height:1.95; color:#eafcff; text-align:left; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
@@ -790,9 +809,9 @@
     <div id="hero">
       <div id="hring">
         <svg viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(6,42,58,.24)" stroke-width="8"/>
+          <circle class="rtk" cx="100" cy="100" r="82" fill="none" stroke="rgba(6,42,58,.24)" stroke-width="8"/>
           <circle id="rProg" cx="100" cy="100" r="82" fill="none" stroke="#0a8478" stroke-width="8" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="515.22" stroke-dashoffset="227"/>
-          <circle cx="100" cy="100" r="65" fill="none" stroke="rgba(6,42,58,.16)" stroke-width="4"/>
+          <circle class="rtkI" cx="100" cy="100" r="65" fill="none" stroke="rgba(6,42,58,.16)" stroke-width="4"/>
           <circle id="rGhost" cx="100" cy="100" r="65" fill="none" stroke="rgba(12,116,106,.85)" stroke-width="4" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="408.41" stroke-dashoffset="290"/>
         </svg>
         <div class="hcenter"><b id="intakeV">1.40</b><small>L drunk</small><div id="ringPct">56%</div></div>
@@ -1437,13 +1456,23 @@ const sets={ 'tod-day':{hemiSky:0xbdeeff,hemiI:1.0,sunC:0xffffff,sunI:1.45,fog:0
   'tod-sunrise':{hemiSky:0xffd8e2,hemiI:0.88,sunC:0xffdccb,sunI:1.05,fog:0x9a7488,fogD:0.05,exp:1.07,biolum:0.0,mote:0.5,amb:0.33,moon:0.0} };
 let todIdx=0;
 function applyTod(){ const cls=tods[todIdx], s=sets[cls]; document.body.classList.remove(...tods); document.body.classList.add(cls);
-  hemi.color.setHex(s.hemiSky); hemi.intensity=s.hemiI; sun.color.setHex(s.sunC); sun.intensity=s.sunI;
-  if(typeof amb!=='undefined') amb.intensity=s.amb; if(typeof moon!=='undefined') moon.intensity=s.moon;
-  scene.fog.color.setHex(s.fog); scene.fog.density=s.fogD; renderer.toneMappingExposure=s.exp;
-  if(typeof window.__placeSkyOrb==='function') window.__placeSkyOrb();   // drift sun/moon to this tod's arc position
-  biolum.material.opacity=s.biolum; motes.material.opacity=s.mote; if(todIdx===1 && typeof spawnDolphinPod==='function'){ for(let _i=0;_i<2;_i++) setTimeout(()=>spawnDolphinPod(), _i*900); } }
-function cycleTod(){ const _nx=(todIdx+1)%tods.length; eatCelestial(()=>{ todIdx=_nx; applyTod(); celestialEmerge(); }); }
+  // the body class drives the 2D canvas palette + the surface-UI theme tokens; the 3D-scene tweaks
+  // below are cosmetic-only now (that pipeline is gated) so guard them and never let them throw.
+  try{
+    hemi.color.setHex(s.hemiSky); hemi.intensity=s.hemiI; sun.color.setHex(s.sunC); sun.intensity=s.sunI;
+    if(typeof amb!=='undefined') amb.intensity=s.amb; if(typeof moon!=='undefined') moon.intensity=s.moon;
+    scene.fog.color.setHex(s.fog); scene.fog.density=s.fogD; renderer.toneMappingExposure=s.exp;
+    if(typeof window.__placeSkyOrb==='function') window.__placeSkyOrb();
+    biolum.material.opacity=s.biolum; motes.material.opacity=s.mote; if(todIdx===1 && typeof spawnDolphinPod==='function'){ for(let _i=0;_i<2;_i++) setTimeout(()=>spawnDolphinPod(), _i*900); }
+  }catch(e){}
+}
+function cycleTod(){ todIdx=(todIdx+1)%tods.length; applyTod(); try{ if(typeof celestialEmerge==='function') celestialEmerge(); }catch(e){} }
 document.getElementById('todBtn').addEventListener('click', cycleTod);
+// auto-pick the time of day from the local clock on load; the manual toggle overrides it thereafter
+(function initTodByClock(){ const h=new Date().getHours();
+  todIdx = (h>=5&&h<7) ? 3 : (h>=7&&h<17) ? 0 : (h>=17&&h<20) ? 1 : 2;   // sunrise / day / sunset / night
+  applyTod();
+})();
 /* celestial tap -> notifications; long-press -> time-of-day. Bound in the swim/moon block below. */
 
 // ---- stars + shooting ----
@@ -3717,6 +3746,30 @@ const ctx = cv.getContext('2d');
 const spacer = document.getElementById('spacer');
 const RM  = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/* ---- time-of-day palettes: only the sky/water/beach/light keys change; creature
+   colours stay constant. Each is a delta merged over the base (day) palette. ---- */
+const TOD_PALETTES = {
+  'tod-day': {}, // base palette is already day
+  'tod-sunset': { skyTop:'#f4a95c', skyHorizon:'#ffe6c6', top:'#2c5f7e', mid:'#123a52', deep:'#08202f', abyss:'#02090f',
+    sand:'#d9bd93', sandWet:'#b89b74', glow:'rgba(255,198,150,', foam:'rgba(255,235,215,', ray:'rgba(255,205,165,1)', cloud:'rgba(255,244,232,0.9)' },
+  'tod-night': { skyTop:'#040a17', skyHorizon:'#0e2338', top:'#0b2c3d', mid:'#07202e', deep:'#04151f', abyss:'#01060b',
+    sand:'#39424f', sandWet:'#2b333d', glow:'rgba(120,160,210,', foam:'rgba(170,195,220,', ray:'rgba(150,190,225,1)', cloud:'rgba(140,158,190,0.38)' },
+  'tod-sunrise': { skyTop:'#ffbdd0', skyHorizon:'#ffeaf2', top:'#2b6a86', mid:'#123a52', deep:'#08222f', abyss:'#02090f',
+    sand:'#e0cbb0', sandWet:'#c3aa8c', glow:'rgba(255,200,215,', foam:'rgba(255,238,242,', ray:'rgba(255,215,225,1)', cloud:'rgba(255,247,250,0.92)' }
+};
+const DAY_KEYS = Object.keys(TOD_PALETTES['tod-sunset']);
+const DAY_SNAPSHOT = {}; DAY_KEYS.forEach(k=>DAY_SNAPSHOT[k]=CONFIG.palette[k]);
+let curTod = '';
+function todFromBody(){ const c=document.body.classList; for(const t of ['tod-sunset','tod-night','tod-sunrise']) if(c.contains(t)) return t; return 'tod-day'; }
+function applyCanvasTod(t){
+  const d = TOD_PALETTES[t] || {};
+  DAY_KEYS.forEach(k=>{ P[k] = (k in d) ? d[k] : DAY_SNAPSHOT[k]; });
+  curTod = t;
+  if (W) { buildGradients(); layoutRays && layoutRays(); }
+}
+let stars = [];
+function buildStars(){ stars = []; const n = 70; for(let i=0;i<n;i++) stars.push({ x:Math.random(), y:Math.random()*0.5, r:0.4+Math.random()*1.1, a:0.35+Math.random()*0.5 }); }
+
 let W = 0, H = 0, DPR = 1;
 let WORLD_H = 0, WATER_Y = 0, MAX_SCROLL = 0;
 let camY = 0, camTarget = 0, tNow = 0;
@@ -3792,21 +3845,24 @@ function drawLand() {
   // sky
   ctx.fillStyle = skyGrad;
   ctx.fillRect(0, 0, W, WATER_Y + 8);
-  // sun
-  ctx.fillStyle = sunGrad;
-  ctx.fillRect(SUN.x - SUN.r, SUN.y - SUN.r, SUN.r * 2, SUN.r * 2);
-  ctx.beginPath();
-  ctx.arc(SUN.x, SUN.y, H * 0.034, 0, TAU);
-  ctx.fillStyle = 'rgba(255,250,235,0.95)';
-  ctx.fill();
+  // stars at night — the sun/moon itself is the interactive #celestial orb (top-right), so the
+  // canvas no longer draws its own disc (that produced a double sun).
+  if (curTod === 'tod-night') {
+    ctx.fillStyle = '#dfeaff';
+    for (const s of stars) {
+      ctx.globalAlpha = s.a * (0.55 + 0.45*Math.sin(tNow*1.6 + s.x*37));
+      ctx.beginPath(); ctx.arc(s.x*W, s.y*WATER_Y, s.r, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
   // clouds
   drawClouds();
-  // beach: a slimmer sand strip + wet band at the waterline (waves overlap -> surf)
-  const sandTop = WATER_Y - H * 0.03;
+  // beach: a slim shoreline strip + wet band at the waterline (waves overlap -> surf)
+  const sandTop = WATER_Y - H * 0.014;
   ctx.fillStyle = P.sand;
-  ctx.fillRect(0, sandTop, W, (WATER_Y + 12) - sandTop);
+  ctx.fillRect(0, sandTop, W, (WATER_Y + 10) - sandTop);
   ctx.fillStyle = P.sandWet;
-  ctx.fillRect(0, WATER_Y - 7, W, 16);
+  ctx.fillRect(0, WATER_Y - 5, W, 12);
 }
 
 /* ---- clouds ---- */
@@ -3823,7 +3879,7 @@ function initClouds() {
   }
 }
 function drawClouds() {
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillStyle = P.cloud || 'rgba(255,255,255,0.92)';
   for (const c of clouds) {
     const u = c.u;
     ctx.beginPath();
@@ -4555,6 +4611,8 @@ function resize() {
   buildDivers();
   ensureInitialSighting();
   drops = []; ringsFx = []; exh = [];
+  buildStars();
+  applyCanvasTod(todFromBody());   // pick up the current time-of-day palette
   camTarget = _orqaCam();
   camY = camTarget;
 }
@@ -4616,6 +4674,8 @@ function loop(now) {
   last = now;
   const t = now / 1000;
   tNow = t;
+
+  const bt = todFromBody(); if (bt !== curTod) applyCanvasTod(bt);   // manual/auto time-of-day switch
 
   camTarget = _orqaCam();
   camY += (camTarget - camY) * (1 - Math.exp(-7 * dt));
