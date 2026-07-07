@@ -83,7 +83,9 @@
   .cloudLayer { position:absolute; left:0; right:0; z-index:1; pointer-events:none; opacity:.9; transition:opacity 1.8s ease; will-change:transform; }
   .cloudLayer.cl-near { z-index:3; }
   body.tod-night .cloudLayer { opacity:.42; }
-  .cloud { position:absolute; background:#ffffff; border-radius:100px; filter:blur(0.5px); opacity:0; }
+  html,body { -webkit-tap-highlight-color:transparent; }
+  button, .tab, .glass, .gl, .chip { touch-action:manipulation; }
+  .cloud { position:absolute; background:#ffffff; border-radius:100px; filter:blur(1.3px); opacity:0; }
   .cloud.c1 { width:120px; height:34px; box-shadow:34px -14px 0 4px #fff, 70px -4px 0 -2px #fff, -22px -2px 0 -4px #fff; }
   .cloud.c2 { width:90px; height:26px; box-shadow:26px -11px 0 2px #fff, 54px -2px 0 -3px #fff; }
   .cloud.c3 { width:150px; height:40px; box-shadow:44px -18px 0 6px #fff, 92px -6px 0 -1px #fff, -28px 0 0 -6px #fff; }
@@ -133,7 +135,7 @@
   .ripple.big { border-width:3px; } @keyframes ripBig { from{opacity:.95; width:20px; height:20px;} to{opacity:0; width:320px; height:320px;} }
   .ripple.big { animation:ripBig .9s ease-out forwards; }
 
-  #brand { position:fixed; z-index:5; top:22px; left:0; right:0; text-align:center; pointer-events:none;
+  #brand { text-shadow:0 2px 16px rgba(4,20,32,.55), 0 1px 3px rgba(4,20,32,.4); position:fixed; z-index:5; top:22px; left:0; right:0; text-align:center; pointer-events:none;
     color:#eafcff; letter-spacing:.42em; font-size:15px; font-weight:300; text-indent:.42em; text-shadow:0 2px 24px rgba(0,0,0,.5); }
   #tag { display:block; margin-top:7px; font-size:10px; letter-spacing:.30em; color:#aee6f2; opacity:.8; }
   #hint { position:fixed; z-index:5; top:90px; left:0; right:0; text-align:center; pointer-events:none;
@@ -212,7 +214,7 @@
   .devLive .rawv { color:#c6fff2; font-weight:600; }
 
   /* LIVE telemetry monitor — Arduino-serial-style streaming overlay */
-  #liveFab { position:fixed; right:14px; bottom:96px; z-index:30; padding:8px 12px; border:1px solid rgba(70,224,210,.35); border-radius:999px; background:rgba(5,16,27,.82); color:#7ff0e4; font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.05em; cursor:pointer; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,.45); }
+  #liveFab { display:none; position:fixed; right:14px; bottom:96px; z-index:30; padding:8px 12px; border:1px solid rgba(70,224,210,.35); border-radius:999px; background:rgba(5,16,27,.82); color:#7ff0e4; font:600 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.05em; cursor:pointer; -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 4px 16px rgba(0,0,0,.45); }
   #liveFab.on { background:rgba(70,224,210,.18); color:#c6fff2; border-color:rgba(70,224,210,.6); }
   #liveMon { position:fixed; left:0; right:0; bottom:0; z-index:31; max-height:48vh; display:flex; flex-direction:column; transform:translateY(102%); transition:transform .3s cubic-bezier(.2,.7,.3,1); background:rgba(4,12,20,.94); border-top:1px solid rgba(70,224,210,.25); -webkit-backdrop-filter:blur(22px); backdrop-filter:blur(22px); }
   #liveMon.open { transform:translateY(0); }
@@ -221,7 +223,7 @@
   #liveMonBar .lmSpacer { flex:1; }
   .lmBtn { padding:5px 9px; border:1px solid rgba(255,255,255,.16); border-radius:8px; background:rgba(255,255,255,.05); color:#cfeaf2; font:600 11px/1 ui-monospace,Menlo,monospace; cursor:pointer; }
   .lmBtn.on { background:rgba(255,180,90,.18); color:#ffd9a8; border-color:rgba(255,180,90,.5); }
-  #liveMonBody { flex:1 1 auto; overflow:auto; padding:8px 12px 14px; font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:#9fe9dd; }
+  #liveMonBody { flex:1 1 auto; overflow:auto; padding:8px 12px calc(14px + env(safe-area-inset-bottom)); font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:#9fe9dd; }
   .liveMonLine { white-space:pre; width:max-content; min-width:100%; }
   .liveMonLine.dim { color:#5d7a86; }
   .liveMonLine.ev { font-weight:700; }
@@ -275,20 +277,29 @@
   .cardInfo .next { font-size:11px; color:#9fd9e6; margin-top:7px; }
   #logBtn { margin-top:11px; padding:10px; border-radius:13px; font-size:12.5px; font-weight:500; text-align:center; color:#04303a; background:#46e0d2; cursor:pointer; }
 
-  #tabbar { position:fixed; left:0; right:0; bottom:0; z-index:8; height:68px; display:flex;
+  #tabbar { position:fixed; left:0; right:0; bottom:0; z-index:8; height:calc(64px + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); display:flex;
     background:rgba(6,20,32,.55); border-top:1px solid rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px); backdrop-filter:blur(22px); }
   #tabbar .tab { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; color:#6f93a6; font-size:9.5px; letter-spacing:.04em; cursor:pointer; }
   #tabbar .tab svg { width:21px; height:21px; }
   #tabbar .tab.active { color:#eafcff; }
   #tabbar .tab.active svg { filter:drop-shadow(0 0 7px rgba(70,224,210,.7)); }
+  #tabbar .tab { position:relative; }
+  #tabbar .tab .tsub { display:none; }
+  #tabbar .tab.connected .tsub { display:block; line-height:1; position:absolute; bottom:2px; left:0; right:0; text-align:center; font-size:8px; letter-spacing:.07em; color:#5ff0df; text-shadow:0 0 8px rgba(70,224,210,.55); }
+  #tabbar .tab.connected svg { color:#46e0d2; animation:connGlow 2.6s ease-in-out infinite; }
+  @keyframes connGlow { 0%,100% { filter:drop-shadow(0 0 4px rgba(70,224,210,.5)); } 50% { filter:drop-shadow(0 0 11px rgba(70,224,210,.95)); } }
 
   #sheet { position:fixed; inset:0; z-index:15; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .3s; }
   #sheet.open { opacity:1; pointer-events:auto; }
   #sheet .scrim { position:absolute; inset:0; background:rgba(2,12,22,.55); }
-  #sheet .panel { position:relative; width:100%; border-radius:28px 28px 0 0; padding:18px 18px 30px;
+  #sheet .panel { position:relative; width:100%; border-radius:28px 28px 0 0; padding:18px 18px calc(26px + env(safe-area-inset-bottom));
     background:rgba(9,26,40,.92); border-top:1px solid rgba(255,255,255,.14); -webkit-backdrop-filter:blur(24px); backdrop-filter:blur(24px);
     transform:translateY(100%); transition:transform .34s cubic-bezier(.2,.7,.3,1); color:#eafcff; }
   #sheet.open .panel { transform:translateY(0); }
+  .pbIn { animation:pbIn .32s cubic-bezier(.2,.7,.3,1) both; }
+  @keyframes pbIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  /* the home layer eases out/in smoothly both directions (dive + panel-open) */
+  #hero,#quickStats,#diveHint,#bottleChip,#freed,#tag,#hstats,#bell { transition:opacity .45s ease; }
   .sheetH { text-align:center; font-size:16px; }
   .sheetSub { text-align:center; font-size:11px; color:#9fd9e6; margin:3px 0 14px; }
   .unitToggle { display:flex; gap:6px; justify-content:center; margin-bottom:12px; }
@@ -323,7 +334,7 @@
   #detail { position:fixed; inset:0; z-index:17; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .3s; }
   #detail.open { opacity:1; pointer-events:auto; }
   #detail .scrim { position:absolute; inset:0; background:rgba(2,12,22,.6); }
-  #detail .dpanel { position:relative; width:100%; max-height:88%; display:flex; flex-direction:column; border-radius:28px 28px 0 0; padding:15px 18px 26px;
+  #detail .dpanel { position:relative; width:100%; max-height:88%; display:flex; flex-direction:column; border-radius:28px 28px 0 0; padding:15px 18px calc(24px + env(safe-area-inset-bottom));
     background:rgba(9,26,40,.96); border-top:1px solid rgba(255,255,255,.14); -webkit-backdrop-filter:blur(26px); backdrop-filter:blur(26px); color:#eafcff;
     transform:translateY(100%); transition:transform .34s cubic-bezier(.2,.7,.3,1); box-shadow:0 -12px 50px rgba(0,0,0,.5); }
   #detail.open .dpanel { transform:translateY(0); }
@@ -354,7 +365,7 @@
   .showBtn.run { background:rgba(70,224,210,.18); color:#bff7ee; }
 
   /* ===== Surface / water-line Home ===== */
-  #sky { position:fixed; left:0; right:0; top:0; height:75%; z-index:3; overflow:hidden; transition:height 1.2s cubic-bezier(.4,0,.2,1); }
+  #sky { position:fixed; left:0; right:0; top:0; height:75%; z-index:3; overflow:hidden; transition:height 1.2s cubic-bezier(.4,0,.2,1), opacity .45s ease; }
   body.tod-day #sky    { background:linear-gradient(180deg,#08243f 0%,#0c5275 66%,#16859e 100%); }
   body.tod-sunset #sky { background:linear-gradient(180deg,#1e2348 0%,#6a4a78 30%,#c0694c 60%,#ee9a4f 82%,#ffd47e 100%); }   /* golden hour */
   body.tod-night #sky  { background:linear-gradient(180deg,#050f22 0%,#0a2742 68%,#11405f 100%); }
@@ -374,14 +385,14 @@
   #quickStats .qs { padding:8px 15px; border-radius:14px; text-align:center; color:#eafcff; min-width:78px; }
   #quickStats .qs b { display:block; font-size:17px; font-weight:500; }
   #quickStats .qs span { font-size:9.5px; color:#9fd9e6; letter-spacing:.05em; }
-  #logBtn { position:fixed; bottom:86px; left:50%; transform:translateX(-50%); z-index:7; padding:13px 30px; border-radius:22px; font-size:14px; font-weight:600; letter-spacing:.01em; color:#04303a; background:linear-gradient(135deg,#5cead9,#28c7b9); box-shadow:0 10px 26px rgba(41,212,197,.34), inset 0 1px 0 rgba(255,255,255,.45); cursor:pointer; transition:transform .15s ease, box-shadow .3s ease; }
+  #logBtn { position:fixed; bottom:calc(84px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); z-index:7; padding:13px 30px; border-radius:22px; font-size:14px; font-weight:600; letter-spacing:.01em; color:#04303a; background:linear-gradient(135deg,#5cead9,#28c7b9); box-shadow:0 10px 26px rgba(41,212,197,.34), inset 0 1px 0 rgba(255,255,255,.45); cursor:pointer; transition:transform .15s ease, box-shadow .3s ease, opacity .45s ease; }
   #logBtn:active { transform:translateX(-50%) scale(.96); }
-  #diveHint { position:fixed; bottom:150px; left:0; right:0; z-index:6; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; pointer-events:none; animation:bobh 2.6s ease-in-out infinite; }
+  #diveHint { position:fixed; bottom:calc(148px + env(safe-area-inset-bottom)); left:0; right:0; z-index:6; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; pointer-events:none; animation:bobh 2.6s ease-in-out infinite; }
   @keyframes bobh { 0%,100%{transform:translateY(0);opacity:.45} 50%{transform:translateY(6px);opacity:.85} }
-  #surfaceHint { position:fixed; bottom:88px; left:0; right:0; z-index:7; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; opacity:0; pointer-events:none; transition:opacity .6s; }
+  #surfaceHint { position:fixed; bottom:calc(88px + env(safe-area-inset-bottom)); left:0; right:0; z-index:7; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; opacity:0; pointer-events:none; transition:opacity .6s; }
   body.dived #surfaceHint { opacity:.6; }
   body.dived #hero, body.dived #quickStats, body.dived #logBtn, body.dived #diveHint, body.dived #bottleChip, body.dived #freed, body.dived #tag { opacity:0; pointer-events:none; transition:opacity .5s; }
-  body.dived #diveHint { animation:none; }
+  body.dived #diveHint, body.panel-open #diveHint { animation:none; }
   #curHint { position:fixed; z-index:6; top:40%; left:0; right:0; text-align:center; font-size:12px; letter-spacing:.34em;
     color:#bfeaf2; opacity:0; pointer-events:none; transition:opacity .5s; text-shadow:0 0 14px rgba(80,220,210,.55); }
   #curHint.show { opacity:.72; }
@@ -799,7 +810,7 @@
       <div class="tab" data-tab="insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 19V11M12 19V5M19 19v-7"/></svg>Insights</div>
       <div class="tab" data-tab="coach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16c6 1 9-2 11-8 1 4 3 6 7 6-1 4-5 6-9 6-5 0-8-2-9-4z"/></svg>Coach</div>
       <div class="tab" data-tab="community"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10" r="2.3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M15 14c2.5 0 4.5 1.8 4.5 5" opacity=".6"/></svg>Pod</div>
-      <div class="tab" data-tab="bottle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3h4M10 3v3l-1.6 2.4A4 4 0 0 0 8 10.6V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8.4a4 4 0 0 0-.4-1.8L14 6V3"/><path d="M8 13h8" opacity=".6"/></svg>Bottle</div>
+      <div class="tab" data-tab="bottle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3h4M10 3v3l-1.6 2.4A4 4 0 0 0 8 10.6V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8.4a4 4 0 0 0-.4-1.8L14 6V3"/><path d="M8 13h8" opacity=".6"/></svg>Bottle<span class="tsub">connected</span></div>
     </div>
   </div>
 
@@ -1062,7 +1073,7 @@ let fish=null, fishModel=null, fishMixer=null, fishHeading=0, fishJaw=null, fish
 const fishTarget=new THREE.Vector2(2.4,-0.8);  // prey / wander point (world XY)
 let fishPressed=false, fishHunt=false, fishWanderT=0, fishBite=0;
 // v9: surfacing + breach (jump) + celebration roll + ocean current
-let fishBreach=0, breachVY=0, breachVX=0, _breachLaunched=false, _focusRot=0, fishRoll=0, celebrateT=12+Math.random()*6;
+let fishBreach=0, breachVY=0, breachVX=0, _breachLaunched=false, _focusRot=0, fishRoll=0, celebrateT=20+Math.random()*12;
 let breachPhase=0, breachSurf=0, _breachPow=1, breachDive=0;   // breach: 0=charge up, 1=airborne, 2=smooth dive-back
 let curX=0, curT=0, curNext=12+Math.random()*14;
 const _fv=new THREE.Vector3();
@@ -1186,39 +1197,64 @@ function stepFish(dt){
   if(fishBreach>0){ stepBreach(dt, cur, surf); return; }
 
   // ---- celebration: a fun jump (surfaced ONLY — never underwater) or a barrel-roll ----
-  if(fishRoll<=0 && !fishHunt && !fishPressed){ celebrateT-=dt; if(celebrateT<=0){ celebrateT=(_dived?10:15)+Math.random()*5; if(!_dived && Math.random()<0.55) breach(0.9+Math.random()*0.5); else fishRoll=1.1; } }
+  if(fishRoll<=0 && !fishHunt && !fishPressed){ celebrateT-=dt; if(celebrateT<=0){ celebrateT=(_dived?22:30)+Math.random()*18; if(!_dived && Math.random()<0.55) breach(0.9+Math.random()*0.5); else fishRoll=1.1; } }
 
-  // ---- natural cruise (rewritten): forward-biased wander, bounded turn-rate, banked, momentum ----
-  const _ud=fish.userData; if(_ud.spd==null){ _ud.spd=_dived?1.3:0.85; _ud.bank=0; }
+  // ---- natural cruise v2: organic meander, burst-glide propulsion, banked + swaying body ----
+  const _ud=fish.userData;
+  if(_ud.spd==null){ _ud.spd=_dived?1.3:0.85; _ud.bank=0; _ud.sway=0; _ud.beat=Math.random()*Math.PI*2; _ud.mA=Math.random()*7; _ud.mB=Math.random()*7; }
   const _chase=fishPressed||fishHunt;
-  if(!_chase){ fishWanderT-=dt; if(fishWanderT<=0){
-      const reach=(_dived?3.4:2.8)+Math.random()*2.4, spread=(_dived?1.15:0.85), mx=halfW*(_dived?1.05:0.92);
+  if(!_chase){ fishWanderT-=dt; const _dxx=fishTarget.x-fish.position.x, _dyy=fishTarget.y-fish.position.y; if(Math.hypot(_dxx,_dyy)<0.5) fishWanderT=0;   // waypoint reached -> pick the next leg now
+  if(fishWanderT<=0){
+      const reach=(_dived?3.6:3.0)+Math.random()*2.6, spread=(_dived?1.0:0.7), mx=halfW*(_dived?1.05:0.92);
       const ang=fishHeading+(Math.random()*2-1)*spread;
-      let tx=fish.position.x+Math.cos(ang)*reach, ty=fish.position.y+Math.sin(ang)*reach;
-      if(tx<-mx||tx>mx) tx=THREE.MathUtils.clamp(-fish.position.x*0.7,-mx,mx);      // if it lands past a wall, aim back toward centre
+      let tx=fish.position.x+Math.cos(ang)*reach, ty=fish.position.y+Math.sin(ang)*reach*0.55;   // flatter travel: real fish cruise, they don't porpoise
+      if(tx<-mx||tx>mx) tx=THREE.MathUtils.clamp(-fish.position.x*0.7,-mx,mx);      // landing past a wall -> re-aim toward centre
       ty=THREE.MathUtils.clamp(ty, floor+0.3, top-0.3);
-      fishTarget.set(tx,ty); fishWanderT=(_dived?1.6:2.6)+Math.random()*2.0; } }
+      fishTarget.set(tx,ty); fishWanderT=(_dived?2.0:2.8)+Math.random()*2.2; } }
   const dx=fishTarget.x-fish.position.x, dy=fishTarget.y-fish.position.y, dist=Math.hypot(dx,dy);
   let desired=Math.atan2(dy,dx);
-  // soft wall-avoidance so it banks away from an edge instead of pinning + spinning in place
+  // organic meander: two slow incommensurate sines wander the heading while cruising,
+  // so the path is a living S-curve instead of straight waypoint legs
+  _ud.mA+=dt*0.31; _ud.mB+=dt*0.83;
+  if(!_chase) desired+=(Math.sin(_ud.mA)*0.32+Math.sin(_ud.mB)*0.11)*Math.min(1,dist/2.2);
+  // soft wall-avoidance so it carves away from an edge instead of pinning
   if(fish.position.x> halfW*1.02 && Math.cos(fishHeading)>0) desired=Math.atan2(dy,-Math.abs(dx)-0.6);
   if(fish.position.x<-halfW*1.02 && Math.cos(fishHeading)<0) desired=Math.atan2(dy, Math.abs(dx)+0.6);
+  { const vy=Math.sin(desired), vx=Math.cos(desired), sMax=Math.sin(1.1);   // never aim near straight up/down:
+    if(Math.abs(vy)>sMax){ const sx=(vx>=0||vx===0)?1:-1; desired=Math.atan2(Math.sign(vy)*sMax, sx*Math.cos(1.1)); } }
   let d=desired-fishHeading; d=((d+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
-  const turnMax=_chase?2.6:(_dived?1.5:0.95);                                       // rad/s cap -> real carves, never a pivot-in-place
+  if(!_chase && dist<1.5 && Math.abs(d)>1.5) fishWanderT=0;                         // waypoint inside the turning circle -> skip to the next leg
+  const turnMax=_chase?2.6:(_dived?1.35:0.8);                                       // rad/s cap -> carves, never a pivot
   const turn=THREE.MathUtils.clamp(d,-turnMax*dt,turnMax*dt); fishHeading+=turn;
-  const spdMax=_dived?3.4:2.1, spdMin=_dived?1.1:0.7;
-  let want=_chase?spdMax:THREE.MathUtils.clamp(spdMin+dist*0.45, spdMin, _dived?2.6:1.6);
-  want*=1-Math.min(0.3, Math.abs(turn/dt)/turnMax*0.3);                             // ease off only slightly in hard turns (keeps forward momentum)
-  _ud.spd+=(want-_ud.spd)*Math.min(1,dt*2.0);                                       // acceleration inertia -> no speed pops
+  const spdMax=_dived?3.4:2.1, spdMin=_dived?1.0:0.7;
+  let want=_chase?spdMax:THREE.MathUtils.clamp(spdMin+dist*0.4, spdMin, _dived?2.5:1.5);
+  const turnFrac=Math.min(1,Math.abs(d)/1.2); want*=1-0.3*turnFrac;                 // shed speed into a tight turn, power out of it
+  if(!_chase) want*=THREE.MathUtils.clamp(dist/1.0,0.55,1);                         // coast the arrival, don't ram the waypoint
+  // burst-and-glide: the tail's power stroke surges speed, drag bleeds it off between strokes
+  const beatHz=(_dived?1.25:0.75)*(0.7+0.6*(_ud.spd/spdMax));
+  _ud.beat+=dt*Math.PI*2*beatHz;
+  const stroke=Math.max(0,Math.sin(_ud.beat));                                      // >0 only on the power half of the cycle
+  const surge=want*(0.8+0.45*stroke);
+  _ud.spd+=(surge-_ud.spd)*Math.min(1,dt*(stroke>0.05?2.4:0.9));                    // quick surge, slow decay = glide
   let spd=_ud.spd+(fishBite>0?5.0*fishBite:0);
   fish.position.x+=(Math.cos(fishHeading)*spd+cur)*dt;
-  fish.position.y+=Math.sin(fishHeading)*spd*dt + Math.sin(clock.elapsedTime*0.7+fish.position.x)*0.03*dt;   // gentle swell
+  fish.position.y+=Math.sin(fishHeading)*spd*dt + Math.sin(clock.elapsedTime*0.6+_ud.mA)*0.05*dt;   // neutral-buoyancy swell
   fish.position.x=THREE.MathUtils.clamp(fish.position.x,-halfW*1.18,halfW*1.18);
   fish.position.y=THREE.MathUtils.clamp(fish.position.y,floor,top);
+  // orientation: head leads along the heading… (up biased off the Y-axis so a turn
+  // sweeping through vertical can never hit lookAt's pole and snap-roll the body)
+  fish.up.set(0,1,0.18);
   _fv.set(fish.position.x+Math.cos(fishHeading),fish.position.y+Math.sin(fishHeading),fish.position.z);
   fish.lookAt(_fv);
-  const _bt=THREE.MathUtils.clamp(-(turn/dt)/turnMax,-1,1)*0.5; _ud.bank+=(_bt-_ud.bank)*Math.min(1,dt*3.0);  // bank amount eases toward turn rate
-  if(fishMixer) fishMixer.timeScale=0.5+THREE.MathUtils.clamp(_ud.spd/spdMax,0,1.4)*1.1;                      // tail beats faster when swimming faster
+  // …then body language: nose recoil-sway against the tail stroke, and a real bank INTO the turn
+  const swayT=Math.sin(_ud.beat)*0.055*(0.4+0.6*Math.min(1,spd/spdMax));
+  _ud.sway+=(swayT-_ud.sway)*Math.min(1,dt*6);
+  fish.rotateY(_ud.sway);
+  const bankT=THREE.MathUtils.clamp(-d*1.4,-1,1)*0.42;
+  _ud.bank+=(bankT-_ud.bank)*Math.min(1,dt*2.2);
+  fish.rotateZ(_ud.bank);
+  // tail animation speed follows real swim effort (the stroke), not just velocity
+  if(fishMixer) fishMixer.timeScale=0.45+(spd/spdMax)*0.9+stroke*0.35;
   if(fishRoll>0){ fishRoll-=dt; fish.rotateZ((1-Math.max(0,fishRoll)/1.1)*Math.PI*2); }  // barrel-roll celebration
   if(fishHunt && dist<0.6 && fishBite<=0){ fishBite=1; fishHunt=false; fishWanderT=0.5; splashWorld(fish.position.x, fish.position.y, fish.position.z, 10); }
   if(fishBite>0) fishBite=Math.max(0, fishBite-dt*2.2);
@@ -1401,8 +1437,8 @@ function buildClouds(){
                 {el:SKY.near, n:2, top:[30,56], scale:[1.2,1.7], speed:[0.34,0.50], cls:['c3','c1']} ];
   for(const L of lanes){ if(!L.el) continue;
     for(let i=0;i<L.n;i++){ const d=document.createElement('div'); d.className='cloud '+L.cls[i%L.cls.length];
-      const sc=L.scale[0]+Math.random()*(L.scale[1]-L.scale[0]), top=L.top[0]+Math.random()*(L.top[1]-L.top[0]), x=Math.random()*120-10, op=0.55+Math.random()*0.35;
-      d.style.top=top+'%'; d.dataset.x=x; d.dataset.sc=sc; d.dataset.spd=(L.speed[0]+Math.random()*(L.speed[1]-L.speed[0])).toFixed(3);
+      const sc=L.scale[0]+Math.random()*(L.scale[1]-L.scale[0]), top=L.top[0]+Math.random()*(L.top[1]-L.top[0]), x=Math.random()*120-10, op=0.42+Math.random()*0.3;
+      d.style.top=top+'%'; d.dataset.x=x; d.dataset.sc=sc; d.dataset.ph=(Math.random()*6.28).toFixed(2); d.dataset.spd=(L.speed[0]+Math.random()*(L.speed[1]-L.speed[0])).toFixed(3);
       d.style.transform='translate3d('+x+'vw,0,0) scale('+sc+')'; d.style.opacity=op; L.el.appendChild(d); SKY.clouds.push(d); } }
 }
 buildClouds();
@@ -1421,12 +1457,17 @@ setTimeout(spawnBird, 4000);
 const ORB_POS = { 0:{x:90,y:18}, 1:{x:90,y:18}, 2:{x:90,y:18}, 3:{x:90,y:18} };
 function placeSkyOrb(){ const p=ORB_POS[todIdx]||ORB_POS[0]; if(SKY.skyEl){ SKY.skyEl.style.setProperty('--sx', p.x+'%'); SKY.skyEl.style.setProperty('--sy', p.y+'%'); } }
 placeSkyOrb(); window.__placeSkyOrb=placeSkyOrb;
-function stepSkyLife(){
+function stepSkyLife(now){
   requestAnimationFrame(stepSkyLife);
+  const dt=Math.min(0.05, ((now-(stepSkyLife._t||now))/1000)||0); stepSkyLife._t=now;
   if(skyHidden()) return;
-  for(const c of SKY.clouds){ let x=parseFloat(c.dataset.x)+parseFloat(c.dataset.spd)*0.12; if(x>120) x=-30; c.dataset.x=x; c.style.transform='translate3d('+x+'vw,0,0) scale('+c.dataset.sc+')'; }
-  for(let i=SKY.birdList.length-1;i>=0;i--){ const b=SKY.birdList[i]; let x=parseFloat(b.dataset.x)+parseFloat(b.dataset.vx); const vx=parseFloat(b.dataset.vx), sc=parseFloat(b.dataset.sc);
-    const t=parseFloat(b.dataset.t)+0.05; b.dataset.t=t; const y=Math.sin(t)*parseFloat(b.dataset.amp); b.dataset.x=x;
+  const T=(now||0)/1000;
+  for(const c of SKY.clouds){ let x=parseFloat(c.dataset.x)+parseFloat(c.dataset.spd)*7.2*dt; if(x>120) x=-30; c.dataset.x=x;
+    const ph=parseFloat(c.dataset.ph||0), sc=parseFloat(c.dataset.sc);
+    const bob=Math.sin(T*0.14+ph)*5, br=1+Math.sin(T*0.10+ph*1.7)*0.035;           // slow vertical bob + soft plump/flatten breathing
+    c.style.transform='translate3d('+x+'vw,'+bob.toFixed(1)+'px,0) scale('+(sc*br).toFixed(3)+','+(sc/br).toFixed(3)+')'; }
+  for(let i=SKY.birdList.length-1;i>=0;i--){ const b=SKY.birdList[i]; let x=parseFloat(b.dataset.x)+parseFloat(b.dataset.vx)*60*dt; const vx=parseFloat(b.dataset.vx), sc=parseFloat(b.dataset.sc);
+    const t=parseFloat(b.dataset.t)+3.0*dt; b.dataset.t=t; const y=Math.sin(t)*parseFloat(b.dataset.amp); b.dataset.x=x;
     b.style.transform='translate3d('+x+'vw,'+y+'px,0) scaleX('+(vx>0?1:-1)*sc+') scaleY('+sc+')';
     if((vx>0&&x>118)||(vx<0&&x<-16)){ b.remove(); SKY.birdList.splice(i,1); } }
 }
@@ -1466,7 +1507,9 @@ function updateHome(){
   const sv=$('streakV'); if(sv) sv.textContent=HS.streak;
   refreshBottleChip();
 }
-function refreshBottleChip(){ const chip=document.getElementById('bottleChip'); if(!chip) return; const p=window.__pod; const on=!!(p&&p.connected);
+function refreshBottleChip(){ const p=window.__pod; const on=!!(p&&p.connected);
+  { const bt=document.querySelector('#tabbar .tab[data-tab="bottle"]'); if(bt) bt.classList.toggle('connected', on); }   // nav-bar shows the connection state
+  const chip=document.getElementById('bottleChip'); if(!chip) return;
   if(chip._on!==on){ chip._on=on; chip.classList.toggle('addmode', !on);   // rebuild only when the connected state flips
     chip.innerHTML = on ? '<span class="lvl"></span><b></b>'
                         : '<span class="addIcon">＋</span><b>Add my ORQA</b>'; }
@@ -1639,11 +1682,11 @@ function renderPod(filter){ filter=filter||'goal'; panelBody.innerHTML=podHTML(f
   panelBody.querySelectorAll('.impact .ic').forEach(c=>c.onclick=()=>{ const k=c.dataset.imp; toast(k==='freed'?"You've donated "+fmtL(HS.freed)+' L of clean water':"You're #2 of 6 in your pod this week"); });
   const pi=panelBody.querySelector('#podimm'); if(pi) pi.onclick=()=>enterImmersive('friends');
 }
-function bottleHTML(){ const ml=stableWaterMl()||465; const wl=Math.max(0,Math.min(100,Math.round((ml/HS.capacity)*100))); const bd=battDisplay();
+function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=POD.connected?Math.max(0,Math.min(100,Math.round((ml/HS.capacity)*100))):0; const bd=battDisplay();
   return `<div class="ins">
   <div class="insLede">Your <b>ORQA pod</b> ${POD.connected?'· connected, live':"· not paired — connect in dev"}.</div>
   <div class="insSec"><div class="lbl">LIVE STATUS</div>
-    <div class="bstatus"><div class="bottleViz"><div class="bfill" id="blvFill" style="height:${wl}%"></div><span id="blvFillT">${POD.connected?ml+' ml':wl+'%'}</span></div>
+    <div class="bstatus"><div class="bottleViz"><div class="bfill" id="blvFill" style="height:${wl}%"></div><span id="blvFillT">${POD.connected?ml+' ml':'—'}</span></div>
       <div class="bstats">
         <div class="brow"><span>Water in bottle</span><b id="blvWaterMl">${POD.connected?ml+' ml':'—'}</b></div>
         <div class="brow"><span>Water left</span><b id="blvWater">${wl}%</b></div>
@@ -1686,6 +1729,7 @@ function bottleHTML(){ const ml=stableWaterMl()||465; const wl=Math.max(0,Math.m
   </div>
 </div>`; }
 function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggleUI==='function') fxSyncToggleUI();
+  { const rb=$('ringbtl'); if(rb && !$('btele')){ const tb=document.createElement(rb.tagName); tb.id='btele'; tb.className=rb.className; tb.textContent='📡 Live telemetry stream'; rb.parentNode.insertBefore(tb, rb.nextSibling); tb.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); }; } }   // telemetry moved here from the old floating chip
   panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ if(typeof glowFlash==='function') glowFlash(parseInt(s.dataset.c)); toast('Bottle glow set'); });
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
   panelBody.querySelectorAll('.btog').forEach(t=>t.onclick=()=>{ const i=t.querySelector('i'); i.classList.toggle('on'); const on=i.classList.contains('on'); if(t.dataset.t==='haptic'){ if(on){ fxPodVibe(60,200); fxVibratePhone(60); } } else { if(on && FX.sound) podCommand('BUZZ:1'); } toast((t.dataset.t==='haptic'?'Haptic ':'Buzzer ')+(on?'on':'off')); });
@@ -1739,6 +1783,7 @@ function showPanel(name){
   else if(name==='community') renderPod();
   else if(name==='bottle') renderBottle();
   else panelBody.innerHTML='<div class="ins"><div class="dEmpty" style="padding:60px 0">'+(TITLES[name]||name)+'<div style="font-size:12px;color:#7f9aa8;margin-top:8px">Swim back home — this current is still forming.</div></div></div>';
+  panelBody.classList.remove('pbIn'); void panelBody.offsetWidth; panelBody.classList.add('pbIn');   // crossfade content on tab switches
   document.body.classList.add('panel-open'); panel.classList.add('open'); panel.scrollTop=0; }
 function hidePanel(){ document.body.classList.remove('panel-open'); panel.classList.remove('open'); }
 document.querySelectorAll('#tabbar .tab').forEach(tb=>tb.addEventListener('click',()=>{
