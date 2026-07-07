@@ -49,7 +49,8 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: orqatest
         run: |
           set -x
-          bubblewrap build --skipPwaValidation
+          # fresh project: 'build' asks to (re)generate from twa-manifest.json — auto-confirm with yes
+          yes | bubblewrap build --skipPwaValidation
       - name: Show outputs
         run: ls -la ./*.apk ./*.aab 2>/dev/null || true
       - name: Upload APK artifact
