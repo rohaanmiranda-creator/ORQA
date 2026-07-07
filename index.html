@@ -374,7 +374,8 @@
   #quickStats .qs { padding:8px 15px; border-radius:14px; text-align:center; color:#eafcff; min-width:78px; }
   #quickStats .qs b { display:block; font-size:17px; font-weight:500; }
   #quickStats .qs span { font-size:9.5px; color:#9fd9e6; letter-spacing:.05em; }
-  #logBtn { position:fixed; bottom:86px; left:50%; transform:translateX(-50%); z-index:7; padding:12px 28px; border-radius:22px; font-size:14px; font-weight:500; color:#eafcff; cursor:pointer; }
+  #logBtn { position:fixed; bottom:86px; left:50%; transform:translateX(-50%); z-index:7; padding:13px 30px; border-radius:22px; font-size:14px; font-weight:600; letter-spacing:.01em; color:#04303a; background:linear-gradient(135deg,#5cead9,#28c7b9); box-shadow:0 10px 26px rgba(41,212,197,.34), inset 0 1px 0 rgba(255,255,255,.45); cursor:pointer; transition:transform .15s ease, box-shadow .3s ease; }
+  #logBtn:active { transform:translateX(-50%) scale(.96); }
   #diveHint { position:fixed; bottom:150px; left:0; right:0; z-index:6; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; pointer-events:none; animation:bobh 2.6s ease-in-out infinite; }
   @keyframes bobh { 0%,100%{transform:translateY(0);opacity:.45} 50%{transform:translateY(6px);opacity:.85} }
   #surfaceHint { position:fixed; bottom:88px; left:0; right:0; z-index:7; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; opacity:0; pointer-events:none; transition:opacity .6s; }
@@ -395,7 +396,7 @@
   #rProg { filter:drop-shadow(0 0 6px rgba(70,224,210,.5)); }
   #rGhost { filter:drop-shadow(0 0 6px rgba(150,245,238,.7)); }
   .hlegend { display:flex; gap:18px; justify-content:center; margin-top:6px; font-size:11px; color:#9fd9e6; }
-  .hlegend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .hlegend i { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:7px; vertical-align:middle; }
   .hlegend i.gh { background:rgba(178,250,242,.6); box-shadow:0 0 6px rgba(150,245,238,.9); }
   #hero .hGoal { margin-top:7px; }
   #quickStats { top:39%; }
@@ -742,7 +743,7 @@
   <div id="surfaceHint">scroll up to surface ↑</div>
 
   <div id="app">
-    <div id="bottleChip" class="gl"><span class="lvl" style="--fill:62%"></span><b>62%</b><span class="conn"></span></div>
+    <div id="bottleChip" class="gl"><span class="lvl" style="--fill:62%"></span><b>62%</b></div>
     <div id="bottlePop"></div>
     <div id="bell" class="gl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0"/></svg><span class="badge" id="bellBadge"></span></div>
     <div id="freed" class="gl"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#46e0d2" stroke-width="1.8"><path d="M12 3c4 5 7 8 7 12a7 7 0 0 1-14 0c0-4 3-7 7-12z"/></svg>freed <b id="freedV">1.4 L</b></div>
@@ -946,10 +947,10 @@
   </div>
 
   <!-- LIVE telemetry monitor — Arduino-serial-style stream, openable from anywhere -->
-  <button id="liveFab" title="Live telemetry stream">📡 LIVE</button>
+  <button id="liveFab" title="Live pod telemetry">Connected</button>
   <div id="liveMon">
     <div id="liveMonBar">
-      <span class="lmTitle">◉ LIVE TELEMETRY</span>
+      <span class="lmTitle">LIVE TELEMETRY</span>
       <span class="lmSpacer"></span>
       <button id="lmPause" class="lmBtn">⏸ Pause</button>
       <button id="lmClear" class="lmBtn">Clear</button>
@@ -1467,7 +1468,7 @@ function updateHome(){
 }
 function refreshBottleChip(){ const chip=document.getElementById('bottleChip'); if(!chip) return; const p=window.__pod; const on=!!(p&&p.connected);
   if(chip._on!==on){ chip._on=on; chip.classList.toggle('addmode', !on);   // rebuild only when the connected state flips
-    chip.innerHTML = on ? '<span class="lvl"></span><b></b><span class="conn live"></span>'
+    chip.innerHTML = on ? '<span class="lvl"></span><b></b>'
                         : '<span class="addIcon">＋</span><b>Add my ORQA</b>'; }
   if(on){ const lvl=chip.querySelector('.lvl'), b=chip.querySelector('b'); const bd=battDisplay();
     if(lvl){ lvl.style.setProperty('--fill', (bd.pct!=null?bd.pct:0)+'%'); lvl.style.setProperty('--battc', battAccent(bd.pct)); }
