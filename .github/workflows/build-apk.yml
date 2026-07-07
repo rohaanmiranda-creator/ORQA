@@ -1,0 +1,53 @@
+name: Build test APK (TWA)
+on:
+  workflow_dispatch:
+  push:
+    branches: [test]
+    paths:
+      - 'twa-manifest.json'
+      - 'icons/**'
+      - '.github/workflows/build-apk.yml'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+      - name: Point Bubblewrap at the runner's JDK + Android SDK
+        run: |
+          mkdir -p ~/.bubblewrap
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > ~/.bubblewrap/config.json
+          cat ~/.bubblewrap/config.json
+      - name: Accept Android SDK licenses
+        run: yes | "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+      - name: Generate a throwaway signing key (sideload/testing only)
+        run: |
+          keytool -genkeypair -v -keystore android.keystore -alias android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass orqatest -keypass orqatest \
+            -dname "CN=ORQA Test, O=ORQA, L=NA, S=NA, C=IN"
+      - name: Build TWA APK
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: orqatest
+          BUBBLEWRAP_KEY_PASSWORD: orqatest
+        run: |
+          set -x
+          bubblewrap build --skipPwaValidation
+      - name: Show outputs
+        run: ls -la ./*.apk ./*.aab 2>/dev/null || true
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orqa-test-apk
+          path: |
+            ./*.apk
+            ./*.aab
+          if-no-files-found: warn
