@@ -17,17 +17,22 @@
   "maskableIconUrl": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/icons/icon-512.png",
   "appVersionName": "0.1.0",
   "appVersionCode": 1,
-  "webManifestUrl": "https://rohaanmiranda-creator.github.io/ORQA/manifest.webmanifest",
+  "webManifestUrl": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/manifest.webmanifest",
   "fallbackType": "customtabs",
   "orientation": "default",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
   "features": {},
-  "alphaDependencies": { "enabled": false },
+  "alphaDependencies": {
+    "enabled": false
+  },
   "enableSiteSettingsShortcut": true,
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://rohaanmiranda-creator.github.io/ORQA/",
   "minSdkVersion": 21,
-  "signingKey": { "path": "./android.keystore", "alias": "android" }
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  }
 }
