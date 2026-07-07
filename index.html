@@ -153,9 +153,10 @@
   #authGate .agBtn.primary { color:#04303a; background:linear-gradient(135deg,#5cead9,#28c7b9); border:none; box-shadow:0 8px 22px rgba(41,212,197,.3); }
   #authGate .agGhost { width:100%; margin-top:6px; padding:8px; font-size:12px; color:#9fd9e6; background:none; border:none; cursor:pointer; text-decoration:underline; }
   #authGate .agBusy { opacity:.6; pointer-events:none; }
-  #brand { text-shadow:0 2px 16px rgba(4,20,32,.55), 0 1px 3px rgba(4,20,32,.4); position:fixed; z-index:5; top:22px; left:0; right:0; text-align:center; pointer-events:none;
-    color:#eafcff; letter-spacing:.42em; font-size:15px; font-weight:300; text-indent:.42em; text-shadow:0 2px 24px rgba(0,0,0,.5); }
-  #tag { display:block; margin-top:7px; font-size:10px; letter-spacing:.30em; color:#aee6f2; opacity:.8; }
+  #brand { position:fixed; z-index:5; top:22px; left:0; right:0; text-align:center; pointer-events:none;
+    color:#0a3a4d; letter-spacing:.42em; font-size:15px; font-weight:400; text-indent:.42em; text-shadow:0 1px 2px rgba(255,255,255,.6), 0 2px 14px rgba(255,255,255,.35); }
+  body.dived #brand { color:#eafcff; font-weight:300; text-shadow:0 2px 24px rgba(0,0,0,.55); }   /* light again over the dark abyss */
+  #tag { display:block; margin-top:7px; font-size:10px; letter-spacing:.30em; color:#1d5a74; opacity:.92; }
   #hint { position:fixed; z-index:5; top:90px; left:0; right:0; text-align:center; pointer-events:none;
     color:#bfe6f0; font-size:11px; letter-spacing:.06em; opacity:.7; }
 
@@ -185,7 +186,7 @@
   /* ===== Home dashboard ===== */
   #hint, .controls { display:none; }
   #app > * { pointer-events:auto; }
-  .gl { background:rgba(9,28,43,.40); border:1px solid rgba(255,255,255,.16);
+  .gl { background:rgba(7,23,36,.70); border:1px solid rgba(255,255,255,.18);
     -webkit-backdrop-filter:blur(20px) saturate(150%); backdrop-filter:blur(20px) saturate(150%); box-shadow:0 8px 30px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.18); }
   #bottleChip { position:fixed; top:58px; left:18px; z-index:7; display:flex; align-items:center; gap:9px; padding:8px 12px; border-radius:15px; font-size:12px; color:#eafcff; }
   #bottleChip .lvl { width:9px; height:26px; border-radius:3px; border:1px solid rgba(255,255,255,.25);
@@ -342,7 +343,7 @@
   #hstats { position:fixed; top:46.5%; left:12px; right:12px; z-index:7; display:flex; gap:9px; justify-content:center; }
   #hstats .hs { flex:1; max-width:130px; padding:9px 8px; border-radius:18px; color:#eafcff; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:5px; transition:transform .16s; -webkit-tap-highlight-color:transparent; }
   #hstats .hs:active { transform:scale(.95); }
-  #hstats .hs .hsLbl { font-size:8.5px; letter-spacing:.13em; color:#9fd9e6; text-transform:uppercase; }
+  #hstats .hs .hsLbl { font-size:8.5px; letter-spacing:.13em; color:#cbebf4; text-transform:uppercase; }
   #hstats .hs .hsVal { font-size:14.5px; font-weight:500; color:#eafcff; text-align:center; line-height:1.15; }
   #hstats .hs .hsSub { font-size:9px; color:#8fb9c7; text-align:center; }
   .miniBottle { width:24px; height:44px; display:block; }
@@ -400,12 +401,12 @@
   #hero .hVol { font-size:44px; font-weight:300; line-height:1; }
   #hero .hVol b { font-weight:500; }
   #hero .hVol small { font-size:18px; color:#bfe6f0; font-weight:400; }
-  #hero .hGoal { font-size:13px; color:#cfeaf2; margin-top:8px; }
-  #hero .hPace { display:inline-block; margin-top:11px; font-size:12px; padding:5px 14px; border-radius:20px; background:rgba(70,224,210,.14); color:#bff7ee; }
+  #hero .hGoal { font-size:13px; color:#1d5a74; margin-top:8px; }
+  #hero .hPace { display:inline-block; margin-top:11px; font-size:12px; font-weight:600; padding:6px 15px; border-radius:20px; background:rgba(12,150,136,.92); color:#ffffff; box-shadow:0 3px 12px rgba(6,40,45,.22); }
   #quickStats { position:fixed; top:24%; left:0; right:0; z-index:7; display:flex; gap:10px; justify-content:center; }
   #quickStats .qs { padding:8px 15px; border-radius:14px; text-align:center; color:#eafcff; min-width:78px; }
   #quickStats .qs b { display:block; font-size:17px; font-weight:500; }
-  #quickStats .qs span { font-size:9.5px; color:#9fd9e6; letter-spacing:.05em; }
+  #quickStats .qs span { font-size:9.5px; color:#cbebf4; letter-spacing:.05em; }
   #logBtn { position:fixed; bottom:calc(84px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); z-index:7; padding:13px 30px; border-radius:22px; font-size:14px; font-weight:600; letter-spacing:.01em; color:#04303a; background:linear-gradient(135deg,#5cead9,#28c7b9); box-shadow:0 10px 26px rgba(41,212,197,.34), inset 0 1px 0 rgba(255,255,255,.45); cursor:pointer; transition:transform .15s ease, box-shadow .3s ease, opacity .45s ease; }
   #logBtn:active { transform:translateX(-50%) scale(.96); }
   #diveHint { position:fixed; bottom:calc(148px + env(safe-area-inset-bottom)); left:0; right:0; z-index:6; text-align:center; font-size:11px; letter-spacing:.14em; color:#cfeaf2; pointer-events:none; animation:bobh 2.6s ease-in-out infinite; }
@@ -422,14 +423,15 @@
   #hring { position:relative; width:150px; height:150px; margin:0 auto 6px; cursor:pointer; pointer-events:auto; }
   #hring svg { display:block; width:150px; height:150px; }
   #hring .hcenter { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
-  #hring .hcenter b { font-size:37px; font-weight:300; line-height:1; color:#f3fbff; }
-  #hring .hcenter small { font-size:10px; color:#9fd9e6; letter-spacing:.08em; margin-top:4px; }
-  #hring .hcenter #ringPct { font-size:12px; color:#7ff0e4; margin-top:6px; letter-spacing:.1em; }
+  #hring .hcenter b { font-size:37px; font-weight:400; line-height:1; color:#083140; }
+  #hring .hcenter small { font-size:10px; color:#1d5a74; letter-spacing:.08em; margin-top:4px; }
+  #hring .hcenter #ringPct { font-size:12px; font-weight:600; color:#06635a; margin-top:6px; letter-spacing:.1em; }
   #rProg { filter:drop-shadow(0 0 6px rgba(70,224,210,.5)); }
   #rGhost { filter:drop-shadow(0 0 6px rgba(150,245,238,.7)); }
-  .hlegend { display:flex; gap:18px; justify-content:center; margin-top:6px; font-size:11px; color:#9fd9e6; }
+  .hlegend { display:flex; gap:18px; justify-content:center; margin-top:6px; font-size:11px; color:#1d5a74; }
   .hlegend i { display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:7px; vertical-align:middle; }
-  .hlegend i.gh { background:rgba(178,250,242,.6); box-shadow:0 0 6px rgba(150,245,238,.9); }
+  .hlegend span i[style] { background:#0a8478 !important; }   /* 'you' swatch — deep teal reads on the light sky */
+  .hlegend i.gh { background:rgba(11,132,120,.75); box-shadow:0 0 6px rgba(11,132,120,.5); }
   #hero .hGoal { margin-top:7px; }
   #quickStats { top:39%; }
   #ringPop { position:fixed; top:26%; left:50%; transform:translate(-50%,-6px); z-index:9; padding:14px 20px; border-radius:16px; font-size:13px; line-height:1.95; color:#eafcff; text-align:left; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
@@ -788,10 +790,10 @@
     <div id="hero">
       <div id="hring">
         <svg viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="8"/>
-          <circle id="rProg" cx="100" cy="100" r="82" fill="none" stroke="#46e0d2" stroke-width="8" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="515.22" stroke-dashoffset="227"/>
-          <circle cx="100" cy="100" r="65" fill="none" stroke="rgba(160,245,238,.07)" stroke-width="4"/>
-          <circle id="rGhost" cx="100" cy="100" r="65" fill="none" stroke="rgba(178,250,242,.55)" stroke-width="4" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="408.41" stroke-dashoffset="290"/>
+          <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(6,42,58,.24)" stroke-width="8"/>
+          <circle id="rProg" cx="100" cy="100" r="82" fill="none" stroke="#0a8478" stroke-width="8" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="515.22" stroke-dashoffset="227"/>
+          <circle cx="100" cy="100" r="65" fill="none" stroke="rgba(6,42,58,.16)" stroke-width="4"/>
+          <circle id="rGhost" cx="100" cy="100" r="65" fill="none" stroke="rgba(12,116,106,.85)" stroke-width="4" stroke-linecap="round" transform="rotate(-90 100 100)" stroke-dasharray="408.41" stroke-dashoffset="290"/>
         </svg>
         <div class="hcenter"><b id="intakeV">1.40</b><small>L drunk</small><div id="ringPct">56%</div></div>
       </div>
@@ -1525,12 +1527,12 @@ function updateHome(){
   const frac=Math.max(0,Math.min(1,(h-8)/(23-8))); const expected=HS.goal*frac; const delta=HS.intake-expected;
   const pp=Math.min(1,expected/HS.goal); const rg=$('rGhost'); if(rg){ rg.setAttribute('stroke-dasharray','408.41'); rg.setAttribute('stroke-dashoffset',(408.41*(1-pp)).toFixed(1)); }
   const sp=$('statusPill');
-  if(HS.intake>=HS.goal){ sp.textContent='goal complete'; sp.style.background='rgba(120,224,140,.18)'; sp.style.color='#cfffd6';
+  if(HS.intake>=HS.goal){ sp.textContent='goal complete'; sp.style.background='rgba(30,168,104,.94)'; sp.style.color='#ffffff';
     if(!HS._met){ HS._met=true; toast('Goal complete — beautifully hydrated'); } }
   else { HS._met=false;
-    if(delta>=200){ sp.textContent='ahead of pace'; sp.style.background='rgba(70,224,210,.16)'; sp.style.color='#bff7ee'; }
-    else if(delta>=-150){ sp.textContent='on pace'; sp.style.background='rgba(70,224,210,.16)'; sp.style.color='#bff7ee'; }
-    else { sp.textContent=(Math.abs(delta)/1000).toFixed(1)+' L behind pace'; sp.style.background='rgba(255,180,90,.18)'; sp.style.color='#ffd9a8'; }
+    if(delta>=200){ sp.textContent='ahead of pace'; sp.style.background='rgba(12,150,136,.94)'; sp.style.color='#ffffff'; }
+    else if(delta>=-150){ sp.textContent='on pace'; sp.style.background='rgba(12,150,136,.94)'; sp.style.color='#ffffff'; }
+    else { sp.textContent=(Math.abs(delta)/1000).toFixed(1)+' L behind pace'; sp.style.background='rgba(230,146,44,.96)'; sp.style.color='#2a1600'; }
   }
   const sv=$('streakV'); if(sv) sv.textContent=HS.streak;
   refreshBottleChip();
