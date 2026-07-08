@@ -52,7 +52,7 @@ jobs:
         run: |
           set -x
           # generate the Android project + checksum non-interactively, then build (no prompts)
-          bubblewrap update --skipVersionUpgrade --appVersionName 0.1.0 --appVersionCode 1 < /dev/null
+          bubblewrap update --skipVersionUpgrade --appVersionName 0.2.0 --appVersionCode 2 < /dev/null
           bubblewrap build --skipPwaValidation < /dev/null
       - name: Show outputs
         run: ls -la ./*.apk ./*.aab 2>/dev/null || true
