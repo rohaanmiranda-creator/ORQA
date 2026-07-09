@@ -3809,7 +3809,10 @@ window.__marineReady=true;   // safe to run stepMarineAll now that MREADY exists
 // cross-device sync. Leave blank to stay device-local (no login wall). The whole
 // thing rides the ORQA.store seam — no other code changes. RLS in db/schema.sql is
 // what protects each user's data (the anon key is public by design).
-const ORQA_CFG = { supabaseUrl: '', supabaseAnonKey: '', localAuth: true };
+// Supabase project (publishable/public key — safe in client code; RLS in db/schema.sql protects data).
+// localAuth stays TRUE so the built-in demo accounts keep working as a fallback if Supabase is
+// unreachable or a demo account hasn't been created in Supabase Auth yet — the demo can't break.
+const ORQA_CFG = { supabaseUrl: 'https://akffjyxjuzqbtbyghfct.supabase.co', supabaseAnonKey: 'sb_publishable_plKpVqZrSuCC-KQjAdurRA_xUWtNmP8', localAuth: true };
 // Local/dev test accounts — for exercising the auth gate + roles during beta.
 // WARNING: these are CLIENT-SIDE only and NOT secure (credentials live in this file and
 // role checks run in the browser); they exist purely to test the role experience. Real
@@ -3852,11 +3855,13 @@ ORQA.auth = (function(){
     const creds=()=>({ email:($('agEmail').value||'').trim().toLowerCase(), password:$('agPass').value||'' });
     $('agSignIn').onclick=async()=>{ const c=creds(); if(!c.email||!c.password) return err('Enter email + password');
       busy(true); err('');
+      const localMatch=()=>ORQA_ACCOUNTS.find(x=>x.email===c.email && x.password===c.password);
       try{
-        if(supaEnabled()){ const {error}=await sb.auth.signInWithPassword(c); if(error) err(error.message); }
-        else { const a=ORQA_ACCOUNTS.find(x=>x.email===c.email && x.password===c.password);
-          if(a) localSignIn(a); else err('Invalid credentials'); }
-      }catch(e){ err(e.message); } finally{ busy(false); } };
+        if(supaEnabled() && sb){ const {error}=await sb.auth.signInWithPassword(c);
+          if(error){ const a=localMatch(); if(a) localSignIn(a); else err(error.message); } }   // cloud first, demo-account fallback
+        else { const a=localMatch(); if(a) localSignIn(a); else err('Invalid credentials'); }
+      }catch(e){ const a=localMatch(); if(a) localSignIn(a); else err(e.message||'Sign-in failed'); }   // Supabase unreachable → keep the demo working
+      finally{ busy(false); } };
     $('agSignUp').onclick=async()=>{ const c=creds();
       if(supaEnabled()){ if(!c.email||!c.password) return err('Enter email + password');
         busy(true); err(''); try{ const {error}=await sb.auth.signUp(c); if(error) err(error.message); else err('Check your email to confirm, then sign in.'); }catch(e){ err(e.message); } finally{ busy(false); } }
@@ -3886,13 +3891,15 @@ ORQA.auth = (function(){
     try{ loadPersisted(true); updateHome(); refreshHomeStats(); refreshBottleChip(); }catch(e){ console.warn(e); } }
 
   async function init(){
+    const restoreLocal=()=>{ let s=null; try{ s=JSON.parse(localStorage.getItem(LS)||'null'); }catch(e){}
+      if(s&&s.role) applyRole(s); else showGate(); };   // keep a locally-authenticated (fallback) session across reloads
     if(supaEnabled()){
       try{ const mod=await import('https://esm.sh/@supabase/supabase-js@2');
         sb=mod.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); ORQA.sb=sb;
         const { data:{ session } }=await sb.auth.getSession();
-        if(session&&session.user) afterSupaAuth(session.user); else showGate();
+        if(session&&session.user) afterSupaAuth(session.user); else restoreLocal();   // cloud session, else a saved local one, else gate
         sb.auth.onAuthStateChange((_e,se)=>{ if(se&&se.user) afterSupaAuth(se.user); });
-      }catch(e){ console.warn('[auth] supabase init failed', e); showGate(); }
+      }catch(e){ console.warn('[auth] supabase unreachable — using local accounts', e); restoreLocal(); }
       return;
     }
     if(localEnabled()){
