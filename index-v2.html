@@ -610,6 +610,20 @@
   .dpv.ok { color:#7ff0e4; } .dpv.off { color:#ff8f8f; }
   /* role-gate: the developer pod panel is visible only to service/admin/superadmin */
   body[data-role="user"] #devPodSec, body[data-role="guest"] #devPodSec { display:none; }
+  /* developer-mode command console */
+  .dpBanner { margin:9px 0 2px; padding:9px 11px; border-radius:11px; font-size:11.5px; line-height:1.5;
+    background:rgba(255,150,90,.12); border:1px solid rgba(255,170,110,.35); color:#ffd9b0; }
+  .dpBanner b { color:#ffe8cf; }
+  .dpCmdGrp { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:7px 0; }
+  .dpGrpL { font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:#5fd0c4; width:52px; flex:0 0 52px; }
+  .dpRaw { display:flex; gap:6px; margin:10px 0 6px; }
+  .dpRaw input { flex:1; min-width:0; background:rgba(6,26,38,.7); border:1px solid rgba(150,210,225,.28); border-radius:9px;
+    color:#eafcff; font-size:12px; font-family:ui-monospace,Menlo,monospace; padding:7px 10px; }
+  .dpRaw input:focus { outline:none; border-color:#46e0d2; }
+  .dpLog { margin-top:8px; max-height:132px; overflow-y:auto; border-radius:9px; background:rgba(4,18,28,.55);
+    border:1px solid rgba(150,210,225,.14); padding:7px 9px; font-family:ui-monospace,Menlo,monospace; font-size:11px; line-height:1.7; }
+  .dpLogEmpty { color:#6f93a2; font-style:italic; }
+  .dpLog .lgSent { color:#bfe6f0; } .dpLog .lgOk { color:#7ff0e4; } .dpLog .lgWarn { color:#ffb45a; } .dpLog .lgErr { color:#ff8f8f; }
   .devRow { display:flex; align-items:center; gap:10px; margin:9px 0; font-size:12px; color:#bfe6f0; }
   .devRow span:first-child { width:48px; }
   .devRow input[type=range] { flex:1; accent-color:#46e0d2; }
@@ -1790,8 +1804,9 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       </div></div>
     <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Tare / zero scale — <b>empty the bottle first</b></div><span class="evJoin" id="btare">Tare now</span></div></div>
   <div class="insHair"></div>
-  <div class="insSec" id="devPodSec"><div class="lbl">🛠 DEVELOPER · POD CONNECTION</div>
-    <div class="bsub">Live BLE diagnostics + command test — for hardware bring-up.</div>
+  <div class="insSec" id="devPodSec"><div class="lbl">🛠 DEVELOPER MODE · POD &amp; HARDWARE</div>
+    <div class="bsub">Live BLE diagnostics + hardware command console — for XIAO nRF52840 bring-up.</div>
+    <div id="dpBtBanner" class="dpBanner" style="display:none"></div>
     <div class="bstats" style="margin-top:6px">
       <div class="brow"><span>Web Bluetooth</span><b id="dpBt">—</b></div>
       <div class="brow"><span>Status</span><b id="dpStatus" class="dpv off">—</b></div>
@@ -1812,16 +1827,38 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" id="dpDisconnect">Disconnect</button>
       <button class="chip" id="dpStream">Raw stream ▸</button>
     </div>
-    <div class="bsub" style="margin-top:12px">Command test · writes char 0x2A59</div>
-    <div class="dpBtns">
-      <button class="chip" data-devcmd="TARE">Tare</button>
-      <button class="chip" data-devcmd="GLOW:0x46e0d2:1500">Glow</button>
-      <button class="chip" data-devcmd="GLOW:OFF">Glow off</button>
-      <button class="chip" data-devcmd="VIBE:180">Vibe</button>
+    <div class="bsub" style="margin-top:12px">Hardware command console · writes ASCII to char <b>0x2A59</b></div>
+    <div class="dpCmdGrp"><span class="dpGrpL">LED</span>
+      <button class="chip" data-devcmd="GLOW:0x46e0d2:1500">Teal</button>
+      <button class="chip" data-devcmd="GLOW:0xffffff:1500">White</button>
+      <button class="chip" data-devcmd="GLOW:0xf43f5e:1500">Red</button>
+      <button class="chip" data-devcmd="GLOW:0x22c55e:1500">Green</button>
+      <button class="chip" data-devcmd="LIGHT:rainbow:cycle:4000">Rainbow</button>
+      <button class="chip" data-devcmd="GLOW:AUTO">Auto</button>
+      <button class="chip" data-devcmd="GLOW:OFF">Off</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
+      <button class="chip" data-devcmd="VIBE:120:120">Vibe·short</button>
+      <button class="chip" data-devcmd="VIBE:220:400">Vibe·long</button>
+      <button class="chip" data-devcmd="HAPTIC:1">Haptic on</button>
+      <button class="chip" data-devcmd="HAPTIC:0">Haptic off</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Buzzer</span>
       <button class="chip" data-devcmd="BUZZ:2000:150">Buzz</button>
+      <button class="chip" data-devcmd="BUZZ:1">Buzz on</button>
+      <button class="chip" data-devcmd="SOUND:0">Sound off</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Ops</span>
+      <button class="chip" data-devcmd="TARE">Tare</button>
+      <button class="chip" data-devcmd="SETGOAL:2500">Set goal</button>
       <button class="chip" data-devcmd="SHOW">8s show</button>
       <button class="chip" data-devcmd="RESETDAY">Reset day</button>
     </div>
+    <div class="dpRaw">
+      <input id="dpCmdInput" placeholder="raw command · e.g. GLOW:0xff8800:2000" autocomplete="off" spellcheck="false">
+      <button class="chip" id="dpCmdSend">Send ▸</button>
+    </div>
+    <div class="dpLog" id="dpCmdLog"><div class="dpLogEmpty">command log · sent commands + pod ACK appear here</div></div>
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
@@ -1852,6 +1889,33 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
     <div class="brow" id="bdiscRow" style="${POD.connected?'':'display:none'}"><span>Bluetooth</span><b id="bdisc" style="color:#ff8f8f;cursor:pointer">Disconnect ›</b></div>
   </div>
 </div>`; }
+// iOS wall: every iOS browser (Safari AND Chrome) uses Apple WebKit, which ships NO
+// Web Bluetooth — so navigator.bluetooth is undefined and no permission prompt can appear.
+const IS_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && (navigator.maxTouchPoints||0)>1);
+function dpBannerText(){
+  if('bluetooth' in navigator) return '';
+  if(IS_IOS) return '⚠︎ <b>iOS blocks Web Bluetooth in every browser.</b> Safari &amp; Chrome on iPhone/iPad both run Apple’s WebKit, which has no Bluetooth API — so no pairing prompt can appear. To test the pod on iOS, open this app in the free <b>Bluefy</b> browser (App Store), or use the <b>Android app</b>. Desktop Chrome/Edge also work.';
+  return '⚠︎ <b>No Web Bluetooth in this browser.</b> Use <b>Chrome or Edge</b> (desktop or Android), the <b>Android app</b>, or the <b>Bluefy</b> browser on iOS.';
+}
+function updateDpBanner(){ const b=document.getElementById('dpBtBanner'); if(!b) return; const t=dpBannerText();
+  if(t){ if(b.dataset.t!==t){ b.innerHTML=t; b.dataset.t=t; } b.style.display='block'; } else b.style.display='none'; }
+function logDevCmd(cmd, cls, note){ const el=document.getElementById('dpCmdLog'); if(!el) return;
+  const empty=el.querySelector('.dpLogEmpty'); if(empty) empty.remove();
+  const ts=new Date(), pad=n=>String(n).padStart(2,'0');
+  const row=document.createElement('div'); row.className=cls||'lgSent';
+  row.textContent=`${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}  ${cmd}${note?'  · '+note:''}`;
+  el.insertBefore(row, el.firstChild); while(el.children.length>40) el.removeChild(el.lastChild); }
+function sendDevCmd(cmd){ cmd=(cmd||'').trim(); if(!cmd) return;
+  if(!POD.connected){ logDevCmd(cmd,'lgErr','pod not connected'); toast('Connect the pod first'); return; }
+  if(!POD.cmdChar){ logDevCmd(cmd,'lgErr','no 0x2A59 command characteristic — firmware must expose it'); toast('No command channel on this pod'); return; }
+  logDevCmd('→ '+cmd,'lgSent');
+  if(typeof podCommandAck==='function'){ podCommandAck(cmd, 2000).then(r=>{
+    if(r.acked) logDevCmd('✓ '+cmd,'lgOk','ACK');
+    else if(r.sent) logDevCmd('✓ '+cmd,'lgWarn','written (no ACK — v11/v12 firmware doesn’t ACK)');
+    else logDevCmd('✗ '+cmd,'lgErr','write failed'); }); }
+  else podCommand(cmd);
+}
+window.__sendDevCmd=sendDevCmd;
 function refreshDevPod(){
   const g=id=>document.getElementById(id); if(!g('dpStatus')) return;   // only when the dev section is on-screen
   const p=POD, set=(id,v,cls)=>{ const e=g(id); if(e){ e.textContent=v; if(cls!=null) e.className=cls; } };
@@ -1877,10 +1941,11 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
     const dr=g('dpReconnect'); if(dr) dr.onclick=()=>{ if(POD.device && typeof tryReconnect==='function') tryReconnect(); else connectPod(); };
     const dd=g('dpDisconnect'); if(dd) dd.onclick=()=>disconnectPod();
     const dsr=g('dpStream'); if(dsr) dsr.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); };
-    panelBody.querySelectorAll('[data-devcmd]').forEach(bt=>bt.onclick=()=>{ const cmd=bt.getAttribute('data-devcmd');
-      if(!POD.connected){ toast('Connect the pod first'); return; }
-      if(podCommand(cmd)) toast('Sent · '+cmd); else toast('No command channel on this pod'); });
-    refreshDevPod(); }
+    panelBody.querySelectorAll('[data-devcmd]').forEach(bt=>bt.onclick=()=>sendDevCmd(bt.getAttribute('data-devcmd')));
+    { const ci=g('dpCmdInput'), cs=g('dpCmdSend');
+      if(cs&&ci){ cs.onclick=()=>{ sendDevCmd(ci.value); ci.value=''; };
+        ci.onkeydown=e=>{ if(e.key==='Enter'){ sendDevCmd(ci.value); ci.value=''; } }; } }
+    updateDpBanner(); refreshDevPod(); }
   { const rb=$('ringbtl'); if(rb && !$('btele')){ const tb=document.createElement(rb.tagName); tb.id='btele'; tb.className=rb.className; tb.textContent='📡 Live telemetry stream'; rb.parentNode.insertBefore(tb, rb.nextSibling); tb.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); }; } }   // telemetry moved here from the old floating chip
   panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ if(typeof glowFlash==='function') glowFlash(parseInt(s.dataset.c)); toast('Bottle glow set'); });
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
@@ -2805,7 +2870,9 @@ function offerDemoMode(){ if(document.getElementById('demoAsk')) return;
   ov.style.cssText='position:fixed;inset:0;z-index:9998;background:rgba(4,18,28,.72);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
   ov.innerHTML='<div style="max-width:320px;background:#0d2331;border:1px solid rgba(70,224,210,.35);border-radius:16px;padding:22px;color:#dff3f2;font:400 14px/1.5 system-ui;">'
     +'<b style="font-size:15px;">Web Bluetooth isn’t available here</b>'
-    +'<p style="margin:10px 0 4px;opacity:.85;">A live pod connection needs <b>Chrome or Edge</b> (desktop or Android). iPhone / Safari can’t connect to the bottle.</p>'
+    +(IS_IOS
+      ? '<p style="margin:10px 0 4px;opacity:.85;"><b>iOS can’t use Web Bluetooth</b> — Safari &amp; Chrome on iPhone/iPad both run Apple’s WebKit, which has no Bluetooth API. To pair the pod on iOS, open this app in the free <b>Bluefy</b> browser (App Store), or use the <b>Android app</b>.</p>'
+      : '<p style="margin:10px 0 4px;opacity:.85;">A live pod connection needs <b>Chrome or Edge</b> (desktop or Android), or the <b>Android app</b>. On iOS, use the <b>Bluefy</b> browser.</p>')
     +'<p style="margin:6px 0 14px;opacity:.85;">You can explore with simulated data instead — demo data is clearly badged and <b>never saved</b>.</p>'
     +'<div style="display:flex;gap:10px;"><button id="demoGo" style="flex:1;background:#46e0d2;color:#08222c;border:0;border-radius:10px;padding:10px;font-weight:700;">Try demo mode</button>'
     +'<button id="demoNo" style="flex:1;background:rgba(255,255,255,.08);color:#dff3f2;border:0;border-radius:10px;padding:10px;">Close</button></div></div>';
