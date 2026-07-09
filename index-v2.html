@@ -869,7 +869,7 @@
         <span class="hsLbl">In bottle</span>
         <span class="miniBottle" id="hsBottleGlyph"></span>
         <span class="hsVal" id="hsBottleV">—</span>
-        <span class="hsSub">tap to open</span>
+        <span class="hsSub" id="hsBottleSub">tap to open</span>
       </div>
       <div class="hs gl" id="hsAction">
         <span class="hsLbl">Bottle now</span>
@@ -2625,6 +2625,36 @@ window.__commitWater=commitWater;
 function stableWaterMl(){ return POD._stableMl!=null ? POD._stableMl : Math.round(POD.waterMl||0); }
 function stableWeightG(){ return POD._stableG!=null ? POD._stableG : Math.round(POD.weight||0); }
 function bottlePct(){ return Math.max(0, Math.min(100, Math.round(stableWaterMl()/Math.max(1,HS.capacity)*100))); }
+// ── LOW-WATER ALERT + SMART REFILL SUGGESTION ──────────────────────────────
+const LOW_WARN=20, LOW_REARM=55, EMPTY_WARN=8;   // % thresholds with hysteresis
+function _clockAt(ms){ const d=new Date(ms); let h=d.getHours(); const m=String(d.getMinutes()).padStart(2,'0'); const ap=h<12?'am':'pm'; h=h%12||12; return h+':'+m+ap; }
+function _trackWaterLevel(){ const ml=stableWaterMl(), now=Date.now(); const h=POD._wLevelHist||(POD._wLevelHist=[]);
+  if(!h.length || now-h[h.length-1].t>25000){ h.push({t:now,ml}); while(h.length>24) h.shift(); } }
+// drinking rate (ml/min) from the level history — counts only decreases, ignores refills
+function drainRateMlPerMin(){ const h=POD._wLevelHist||[]; if(h.length<2) return 0; let drop=0, mins=0;
+  for(let i=1;i<h.length;i++){ const d=h[i-1].ml-h[i].ml; if(d>0) drop+=d; mins+=(h[i].t-h[i-1].t)/60000; }
+  return mins>0.5 ? drop/mins : 0; }
+function timeToEmptyMin(){ const r=drainRateMlPerMin(); if(r<=0.6) return null; return Math.round(stableWaterMl()/r); }
+// typical refill hour learned from refill history (this session + persisted logs)
+function habitualRefillClock(){ const rl=(REFILLLOG||[]).slice(0,24); if(rl.length<3) return null;
+  const mins=rl.map(r=>{ const d=new Date(r.t); return d.getHours()*60+d.getMinutes(); }).sort((a,b)=>a-b);
+  const med=mins[mins.length>>1]; const base=new Date(); base.setHours(Math.floor(med/60), med%60, 0, 0); return _clockAt(base.getTime()); }
+// one-line, human refill suggestion combining current pace + learnt habit
+function refillSuggestion(){ if(!POD.connected) return null; const pct=bottlePct(), tte=timeToEmptyMin(), hab=habitualRefillClock();
+  const parts=[];
+  if(tte!=null){ if(tte<=4) parts.push('empties in a few min'); else parts.push('~'+tte+' min left · empty ≈'+_clockAt(Date.now()+tte*60000)); }
+  else if(pct<LOW_WARN) parts.push('running low — top up soon');
+  if(hab) parts.push('you usually refill ~'+hab);
+  return parts.length? parts.join(' · ') : null; }
+// fires the getting-low / almost-empty notifications, with hysteresis so it never spams
+function waterMonitor(){ if(!POD.connected) return; _trackWaterLevel(); const pct=bottlePct();
+  const tte=timeToEmptyMin(); const te = tte!=null && tte<=120 ? ' · ~'+tte+' min left' : '';
+  if(pct<EMPTY_WARN && !POD._emptyWarned){ POD._emptyWarned=true; POD._lowWarned=true;
+    notify('<span class="nic">🫗</span> <b>Bottle almost empty · '+pct+'%</b> — refill now'+te, '#ff8f8f'); try{ fxPodVibe(90,300); }catch(e){} }
+  else if(pct<LOW_WARN && !POD._lowWarned){ POD._lowWarned=true;
+    const s=refillSuggestion(); notify('<span class="nic">💧</span> <b>Bottle getting low · '+pct+'%</b>'+(s?' — '+s:' — top up soon'), '#ffb45a'); }
+  else if(pct>=LOW_REARM){ POD._lowWarned=false; POD._emptyWarned=false; } }
+window.__waterMonitor=waterMonitor; window.__bottlePct=bottlePct; window.__refillSuggestion=refillSuggestion;
 // TARE the bottle: calibrate the EMPTY-bottle weight on the pod, then track water (added /
 // removed / consumed) from that zero. Also clears the app's averaging windows so the reading
 // re-settles cleanly from the new baseline.
@@ -2747,6 +2777,12 @@ function refreshHomeStats(){
   const pct=bottlePct();
   const bg=$('hsBottleGlyph'); if(bg && bg._pct!==pct){ bg.innerHTML=bottleSVG(pct); bg._pct=pct; }
   setFlash($('hsBottleV'), pct+'%');
+  { const sub=$('hsBottleSub'); if(sub){ let t='tap to open';
+      if(POD.connected){ const tte=timeToEmptyMin();
+        if(pct<EMPTY_WARN) t='refill now';
+        else if(pct<LOW_WARN) t=(tte!=null&&tte<=90)?('~'+tte+' min left'):'refill soon';
+        else if(tte!=null&&tte<=45) t='~'+tte+' min left'; }
+      if(sub.textContent!==t){ sub.textContent=t; sub.style.color=(POD.connected&&pct<LOW_WARN)?'#ffb45a':''; } } }
   const a=bottleAction||{label:'Resting',key:'rest'};
   const ag=$('hsActGlyph'); if(ag && ag._k!==a.key){ ag.innerHTML=ACT_ICON[a.key]||ACT_ICON.rest; ag._k=a.key; }
   setFlash($('hsActV'), a.label);
@@ -2757,7 +2793,7 @@ function refreshHomeStats(){
 // ── LIVE SYNC ── one call refreshes EVERY pod-bound surface; runs on every telemetry
 //    frame (real pod ~150 ms, or the demo stream) so the whole app tracks the pod in
 //    real time. Discrete events (sip/refill/dispose) additionally append to history.
-function refreshLive(){ commitWater(); checkUnexplained(); classifyAction(); refreshBottleChip(); refreshBottleLive(); refreshHomeStats(); tickDetail(); updateDevLive(); updateTareProj(); pushLiveFrame(); }
+function refreshLive(){ commitWater(); checkUnexplained(); classifyAction(); waterMonitor(); refreshBottleChip(); refreshBottleLive(); refreshHomeStats(); tickDetail(); updateDevLive(); updateTareProj(); pushLiveFrame(); }
 // ── SAFETY-NET: water vanished with no sip/refill/dispose event ──────────────
 // The pod classifies sip/refill/pour-out and fires events (each stamps POD._evtAt
 // + resets the baseline). If the stable water level still drops with NO event to
