@@ -619,6 +619,8 @@
   .dpBanner b { color:#ffe8cf; }
   .dpCmdGrp { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:7px 0; }
   .dpGrpL { font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:#5fd0c4; width:52px; flex:0 0 52px; }
+  .dpCmdGrp .chip.on { background:rgba(70,224,210,.22); border-color:#46e0d2; color:#eafcff; }
+  .dpFmtHint { font-size:10px; color:#7f9aa8; line-height:1.4; flex-basis:100%; margin-top:2px; }
   .dpRaw { display:flex; gap:6px; margin:10px 0 6px; }
   .dpRaw input { flex:1; min-width:0; background:rgba(6,26,38,.7); border:1px solid rgba(150,210,225,.28); border-radius:9px;
     color:#eafcff; font-size:12px; font-family:ui-monospace,Menlo,monospace; padding:7px 10px; }
@@ -1856,6 +1858,13 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" data-devcmd="GLOW:AUTO">Auto</button>
       <button class="chip" data-devcmd="GLOW:OFF">Off</button>
     </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">LED fmt</span>
+      <button class="chip" data-ledfmt="0x">0x…</button>
+      <button class="chip" data-ledfmt="bare">RRGGBB</button>
+      <button class="chip" data-ledfmt="hash">#RRGGBB</button>
+      <button class="chip" data-ledfmt="rgb">R,G,B</button>
+      <span class="dpFmtHint" id="dpFmtHint">tap each · the one that flashes the LED red is your firmware's format</span>
+    </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
       <button class="chip" data-devcmd="VIBE:120:120">Vibe·short</button>
       <button class="chip" data-devcmd="VIBE:220:400">Vibe·long</button>
@@ -1977,6 +1986,13 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
     const dd=g('dpDisconnect'); if(dd) dd.onclick=()=>disconnectPod();
     const dsr=g('dpStream'); if(dsr) dsr.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); };
     panelBody.querySelectorAll('[data-devcmd]').forEach(bt=>bt.onclick=()=>sendDevCmd(bt.getAttribute('data-devcmd')));
+    { // LED colour-format switcher: pick the format, flash the LED red to test — the whole light system adopts it
+      const cur=(window.__ledFmt&&window.__ledFmt())||'0x';
+      panelBody.querySelectorAll('[data-ledfmt]').forEach(bt=>{ bt.classList.toggle('on', bt.getAttribute('data-ledfmt')===cur);
+        bt.onclick=()=>{ const f=bt.getAttribute('data-ledfmt'); if(window.__ledFmt) window.__ledFmt(f);
+          panelBody.querySelectorAll('[data-ledfmt]').forEach(x=>x.classList.toggle('on', x===bt));
+          if(!POD.connected){ toast('Connect the pod first'); return; }
+          if(typeof ledColorToken==='function'){ sendDevCmd('GLOW:'+ledColorToken('ff0000')); } }; }); }
     { const ci=g('dpCmdInput'), cs=g('dpCmdSend');
       if(cs&&ci){ cs.onclick=()=>{ sendDevCmd(ci.value); ci.value=''; };
         ci.onkeydown=e=>{ if(e.key==='Enter'){ sendDevCmd(ci.value); ci.value=''; } }; } }
@@ -2240,8 +2256,18 @@ function fxPlaySound(name, arg){ if(!FX.sound) return; try{ (FX_SOUNDS[name]||fu
 function fxVibratePhone(pattern){ if(FX.vibe && navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
 function fxPodVibe(amp, ms, type){ if(FX.vibe && POD.cmdChar) podCommand('VIBE:'+amp+(ms?':'+ms:'')+(type?':'+type:'')); }
 
+// ---- LED colour format: firmware GLOW parsers vary (0xRRGGBB / RRGGBB / #RRGGBB / R,G,B).
+// The format is user-selectable in Developer Mode and persisted, so the light works on ANY
+// firmware without knowing its parser. Every GLOW/LIGHT colour token flows through here. ----
+let LEDFMT='0x'; try{ LEDFMT=localStorage.getItem('orqaLedFmt')||'0x'; }catch(e){}
+function setLedFmt(f){ LEDFMT=f; try{ localStorage.setItem('orqaLedFmt', f); }catch(e){} }
+function ledColorToken(hex6){ hex6=String(hex6).replace(/^0x/,'').replace(/^#/,'').toLowerCase();
+  const r=parseInt(hex6.slice(0,2),16)||0, g=parseInt(hex6.slice(2,4),16)||0, b=parseInt(hex6.slice(4,6),16)||0;
+  switch(LEDFMT){ case 'bare': return hex6; case 'hash': return '#'+hex6; case 'rgb': return r+','+g+','+b; default: return '0x'+hex6; } }
+function glowCmd(hex6, ms){ return 'GLOW:'+ledColorToken(hex6)+(ms?':'+ms:''); }
+window.__ledFmt=(f)=>{ if(f) setLedFmt(f); return LEDFMT; };
 // ---- glow (pod LED + on-screen LED simulation) ----
-function fxGlowHex(hex6, ms){ if(FX.rgb && POD.cmdChar) podCommand('GLOW:0x'+String(hex6).replace(/^0x/,'')+(ms?':'+ms:'')); }
+function fxGlowHex(hex6, ms){ if(FX.rgb && POD.cmdChar) podCommand(glowCmd(hex6, ms)); }
 function fxGlow(intHex){ fxGlowHex(('000000'+(intHex>>>0).toString(16)).slice(-6)); }
 function fxScreenGlow(color, mode, ms){ if(!FX.rgb) return; let el=document.getElementById('fxLed');
   if(!el){ el=document.createElement('div'); el.id='fxLed'; document.body.appendChild(el); }
@@ -2998,7 +3024,7 @@ if(_bottleTab){
 $('devClose').addEventListener('click', ()=>devEl.classList.remove('open'));
 
 // glowFlash now only relays the colour to the physical bottle LED — no on-screen glow.
-function glowFlash(hex){ if(!FX.rgb) return; podCommand('GLOW:0x'+('000000'+(hex>>>0).toString(16)).slice(-6)); }
+function glowFlash(hex){ if(!FX.rgb) return; podCommand(glowCmd(('000000'+(hex>>>0).toString(16)).slice(-6))); }
 document.querySelectorAll('#glowSw span').forEach(s=>s.addEventListener('click',()=>{ glowFlash(parseInt(s.dataset.c)); toast('Bottle glowing'); }));
 $('devBatt').addEventListener('input', e=>{ const v=+e.target.value; HS.battery=v; if(POD.connected){ POD.battery=v; POD.voltage=lipoVolts(v); batteryMonitor(); } $('devBattV').textContent=v+'%'; refreshBottleChip(); refreshBottleLive(); });
 // ── master switches (DJ console + bottle-tab settings): each silences BOTH the pod AND the phone ──
@@ -3752,12 +3778,13 @@ window.__marineReady=true;   // safe to run stepMarineAll now that MREADY exists
   // ANY firmware that supports a solid GLOW — no per-mode firmware needed. Spatial modes (ring wave,
   // chase, scanner, comet) need per-LED addressing → the firmware renders those from the LIGHT command.
   const STREAMED=new Set(['RAINBOW','GRADIENT','BREATHE','PULSE','FADE','GLOW','SOLID']);
-  const GLhex = c => '0x'+String(c).replace(/^0x/,'').toLowerCase();   // firmware expects 0x-prefixed hex (matches the working console commands)
+  const GL = (c,ms) => (typeof glowCmd==='function') ? glowCmd(c,ms) : ('GLOW:0x'+String(c).replace(/^0x/,''));   // user-selected LED colour format
+  const LTOK = c => (typeof ledColorToken==='function') ? ledColorToken(c) : ('0x'+String(c).replace(/^0x/,''));
   function runLightFx(hex, mode, ms, scheme){
     if(_lt){ clearInterval(_lt); _lt=null; } clearTimeout(runLightFx._stop);
     if(!(typeof POD!=='undefined' && POD.cmdChar)) return;     // no pod → on-screen sim only
     const M=(mode||'solid').toUpperCase();
-    if(M==='SOLID'||M==='GLOW'){ podCommand('GLOW:'+GLhex(hex)); return; }
+    if(M==='SOLID'||M==='GLOW'){ podCommand(GL(hex)); return; }
     if(STREAMED.has(M)){
       const pal = (M==='GRADIENT'||M==='FADE') ? (GRAD_SCHEMES[scheme]||lightPalette(hex)) : null;
       const period = M==='RAINBOW'?5000 : M==='BREATHE'?2600 : M==='PULSE'?1100 : 4000;
@@ -3767,15 +3794,15 @@ window.__marineReady=true;   // safe to run stepMarineAll now that MREADY exists
         else if(M==='BREATHE') col=hexShift(hex, 0.12+0.88*(0.5-0.5*Math.cos(ph*2*Math.PI)));
         else if(M==='PULSE') col=hexShift(hex, ph<0.5?1:0.08);
         else if(pal){ const seg=ph*pal.length, i=Math.floor(seg)%pal.length; col=mixHex(pal[i], pal[(i+1)%pal.length], seg-Math.floor(seg)); }
-        podCommand('GLOW:'+GLhex(col)); };
+        podCommand(GL(col)); };
       frame(); _lt=setInterval(frame, 90);                     // animate continuously until Off / a new mode
       runLightFx._stop=setTimeout(()=>window.__lightFxStop(), Math.max(ms||0, 90000));   // safety cap only
       return;
     }
     // spatial / native modes — firmware animates from the LIGHT command (ring, chase, scanner, comet, wipe, disco, strobe, flicker)
-    podCommand('GLOW:'+GLhex(hex));
+    podCommand(GL(hex));
     if(MULTI_FX.has(M)){ const p=lightPalette(hex); podCommand('LIGHT:'+p.join('-')+':'+M+':'+(ms||4000)); }
-    else podCommand('LIGHT:'+GLhex(hex)+':'+M+':'+(ms||4000));
+    else podCommand('LIGHT:'+LTOK(hex)+':'+M+':'+(ms||4000));
     runLightFx._stop=setTimeout(()=>window.__lightFxStop(), Math.max(ms||0, 8000));
   }
   window.__runLight=runLightFx;
