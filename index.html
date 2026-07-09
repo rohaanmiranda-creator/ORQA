@@ -455,6 +455,27 @@
   .hlegend i.gh { background:var(--rGh); box-shadow:0 0 6px var(--rGh); }
   #hero .hGoal { margin-top:7px; }
   #quickStats { top:39%; }
+  /* SHORT screens (iPhone SE / mini / 8 ~667px): the fixed-height hero would overlap the
+     %-positioned stat rows — compress the hero and give the rows more room. */
+  @media (max-height: 760px){
+    #brand { top:15px; font-size:14px; }
+    #freed { top:52px; }
+    #hero { top:5.5%; }
+    #hring, #hring svg { width:118px; height:118px; }
+    #hring .hcenter b { font-size:29px; }
+    #hring .hcenter small { font-size:9px; margin-top:2px; }
+    #hring .hcenter #ringPct { font-size:11px; margin-top:3px; }
+    .hlegend { margin-top:3px; font-size:10px; gap:12px; }
+    #hero .hGoal { margin-top:4px; font-size:11.5px; }
+    #hero .hPace { margin-top:7px; padding:4px 12px; font-size:11px; }
+    #quickStats { top:41%; }
+    #quickStats .qs { padding:6px 13px; min-width:72px; }
+    #quickStats .qs b { font-size:15px; }
+    #hstats { top:49%; }
+    #hstats .hs { padding:7px 6px; }
+    #hstats .hs .hsVal { font-size:13px; }
+    #hstats .hs .hsSub { font-size:8px; }
+  }
   #ringPop { position:fixed; top:26%; left:50%; transform:translate(-50%,-6px); z-index:9; padding:14px 20px; border-radius:16px; font-size:13px; line-height:1.95; color:#eafcff; text-align:left; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
     background:rgba(9,28,43,.94); border:1px solid rgba(255,255,255,.16); -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px); box-shadow:0 12px 40px rgba(0,0,0,.45); }
   #ringPop.show { opacity:1; transform:translate(-50%,0); pointer-events:auto; }
