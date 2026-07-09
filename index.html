@@ -1736,11 +1736,27 @@ function insHTML(range){ const d=insData(range); const lbl={today:'Today',week:'
       <div class="insLine">You sleep <b>22 min</b> longer on nights you hit goal — and wake with <b>+8%</b> HRV.</div></div>
     <div class="drCTA" id="insimm"><b>See it through your orca ▸</b><span>your hydration, alive in 3D</span></div>
   </div>`; }
-function mockSips(){ const rows=[['07:42',180,'first drink of the day — strong start'],['09:15',90,'steady sip · 3s'],['10:30',120,'steady sip · 4s'],['13:05',60,'small sip · 2s'],['15:40',140,'gulped 140 ml in 5s']];
+function _seededRand(seed){ let s=(seed>>>0)||1; return ()=>{ s=(Math.imul(s,1664525)+1013904223)>>>0; return s/4294967296; }; }
+// Realistic per-bar sip history, deterministically generated from the bar (so each day/week/hour
+// shows a DIFFERENT, stable list instead of one hardcoded set). Totals track the bar height.
+function genSips(range, i){
+  const bar=(insData(range).bars[i])||{v:60,l:''}; const goal=HS.goal||2500;
+  let total=Math.round((bar.v/100)*goal);
+  if(range==='week' && DAYHIST.length){ const d=DAYHIST.slice(0,7).reverse()[i]; if(d) total=d.intake; }
+  total=Math.max(650,Math.min(3200,total||1500));
+  const rnd=_seededRand(range.charCodeAt(0)*131 + i*911 + total);
+  const n=Math.max(4,Math.min(13, Math.round(total/165)+(Math.floor(rnd()*3)-1)));
+  const notes=['first drink of the day — strong start','steady sip','morning top-up','post-workout gulp','small sip','a good long pull','afternoon refresh','evening wind-down','quick sip','with lunch'];
+  const startH=6.4+rnd()*1.6; let remaining=total; const rows=[];
+  for(let k=0;k<n;k++){ const frac=k/(n-1||1); const hour=Math.max(0,Math.min(23.5, startH+frac*(21.8-startH)+(rnd()-0.5)*0.9));
+    const hh=Math.floor(hour), mm=Math.floor((hour-hh)*60);
+    let ml=Math.round(45+rnd()*175); if(k===n-1) ml=Math.max(30,remaining); ml=Math.max(20,Math.min(ml,remaining)); remaining-=ml;
+    rows.push([String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0'), ml, notes[Math.floor(rnd()*notes.length)]+' · '+(1+Math.floor(rnd()*5))+'s']);
+    if(remaining<=20) break; }
   return rows.map(r=>`<div class="sipRow"><span class="t">${r[0]}</span><span class="x">${r[1]} ml</span></div><div class="sipNote">${r[2]}</div>`).join(''); }
 function selectBar(range,i,el){ panelBody.querySelectorAll('#bars .bar').forEach(b=>b.classList.remove('sel')); el.classList.add('sel');
   const label=insData(range).bars[i].l; const drill=$('drill');
-  drill.innerHTML=`<div class="lbl">${label.toUpperCase()} · sip history · tap a sip</div>`+mockSips();
+  drill.innerHTML=`<div class="lbl">${label.toUpperCase()} · sip history · tap a sip</div>`+genSips(range,i);
   drill.querySelectorAll('.sipNote').forEach(n=>n.style.display='none');
   drill.classList.add('open');
   drill.querySelectorAll('.sipRow').forEach(r=>r.onclick=()=>{ const n=r.nextElementSibling; if(n) n.style.display=n.style.display==='block'?'none':'block'; }); }
