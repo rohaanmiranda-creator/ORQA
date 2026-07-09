@@ -3887,7 +3887,11 @@ ORQA.auth = (function(){
   async function afterSupaAuth(user){ hideGate(); let seed={};
     try{ const { data } = await sb.from('app_state').select('k,v').eq('user_id', user.id); (data||[]).forEach(r=>seed[r.k]=r.v); }catch(e){ console.warn('[sync] pull failed', e); }
     ORQA.store.use(makeAdapter(seed));
-    applyRole({ email:user.email, role:(user.user_metadata&&user.user_metadata.role)||'user', name:user.email });
+    // role priority: Supabase user_metadata.role → known demo-account mapping (by email) → 'user'.
+    // Keeps admin/superadmin privileges when signing in through the cloud.
+    const known = ORQA_ACCOUNTS.find(a=>a.email===(user.email||'').toLowerCase());
+    const role = (user.user_metadata&&user.user_metadata.role) || (known&&known.role) || 'user';
+    applyRole({ email:user.email, role, name:(known&&known.name)||user.email });
     try{ loadPersisted(true); updateHome(); refreshHomeStats(); refreshBottleChip(); }catch(e){ console.warn(e); } }
 
   async function init(){
