@@ -760,6 +760,9 @@
   .teleEmpty{ grid-column:1/-1; text-align:center; color:#6f93a6; font-size:12px; padding:14px 0; }
 
   /* tare → live water projection */
+  .calStat{ font-size:11px; line-height:1.5; color:#9fd9e6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:8px 11px; margin:8px 0; }
+  .calStat.ok{ color:#bff7ee; border-color:rgba(70,224,210,.4); background:rgba(70,224,210,.1); } .calStat.ok b{ color:#eafcff; }
+  .calStat.half{ color:#ffd9a8; border-color:rgba(255,180,90,.35); background:rgba(255,180,90,.1); }
   .tareProj{ background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:16px; padding:12px 13px; margin:6px 0; }
   .tpHead{ font-size:9.5px; letter-spacing:.16em; color:#7fb0c0; margin-bottom:8px; }
   .tpBar{ height:10px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; margin-bottom:9px; }
@@ -933,16 +936,24 @@
     <h3>BOTTLE</h3>
     <div class="devRow"><span>Battery</span><input type="range" id="devBatt" min="0" max="100" value="62"><span class="val" id="devBattV">62%</span></div>
     <div class="devNote">Battery % + voltage are <b>live from the pod</b> (BATT / VBAT telemetry, every frame). This slider just simulates it in demo mode.</div>
-    <div class="devRow"><span>Capacity</span><input type="range" id="devCap" min="250" max="1500" step="50" value="750"><span class="val" id="devCapV">750ml</span></div>
+    <div class="devRow"><span>Capacity</span><input type="range" id="devCap" min="250" max="1500" step="50" value="600"><span class="val" id="devCapV">600ml</span></div>
     <button class="devBtn" data-cmd="RESETDAY">↺ Reset day totals</button>
 
     <h3>LIVE TELEMETRY</h3>
     <div class="devNote">raw load cell · IMU · state — updates every pod frame</div>
     <div class="teleGrid" id="devLive"></div>
 
-    <h3>SCALE · TARE</h3>
-    <div class="devNote">Tare the <b>empty</b> bottle → it then measures water added / sipped / removed from 0.</div>
-    <button class="devBtn" id="devTareBottle">⊘ Tare bottle (calibrate empty)</button>
+    <h3>SCALE · CALIBRATION</h3>
+    <div class="devNote">2-point calibration: capture the raw reading with the bottle <b>empty</b>, then <b>full</b>. The app maps that weight span straight to <b>600 ml</b>, so sips read out in real ml. Hold the bottle upright &amp; still when you tap.</div>
+    <div class="dpBtns">
+      <button class="devBtn" id="calEmpty">① Set empty</button>
+      <button class="devBtn" id="calFull">② Set full</button>
+      <button class="devBtn" id="calClearBtn">Clear</button>
+    </div>
+    <div class="calStat" id="calStat">not calibrated</div>
+    <div class="devRow"><span>Stability</span><input type="range" id="devStab" min="4" max="30" step="1" value="12"><span class="val" id="devStabV">12</span></div>
+    <div class="devNote">Samples a reading must hold <b>steady &amp; upright</b> before it counts (higher = more accurate, slower). Tilt/motion samples are ignored, so transit jostling won't register as a sip.</div>
+    <button class="devBtn" id="devTareBottle">⊘ Quick zero (empty only)</button>
     <div class="tareProj" id="tareProj" data-tared="0">
       <div class="tpHead">Calibrated bottle · live water</div>
       <div class="tpBar"><i id="tpFill"></i></div>
@@ -1572,7 +1583,7 @@ requestAnimationFrame(stepSkyLife);
 // ===== Home dashboard =====
 // Daily fields start at ZERO — real state restores from localStorage (see the
 // persistence module); demo values only ever appear via explicit Demo mode.
-const HS = { goal:2500, intake:0, freed:0, donated:0, wasted:0, avgSip:35, unit:'ml', capacity:750, battery:62, streak:0, _goalHit:false };
+const HS = { goal:2500, intake:0, freed:0, donated:0, wasted:0, avgSip:35, unit:'ml', capacity:600, battery:62, streak:0, _goalHit:false };
 // ORQA community impact (the shared "Fill the Well" charity total, in litres) — grows with you
 const ORQA_COMMUNITY = { litres:128450, people:5138 };
 const ARC = 2*Math.PI*40;
@@ -1933,7 +1944,7 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
     <div class="findRow"><div class="bsub" style="margin:0">Nearby · ~2 m · getting warmer</div><span class="evJoin" id="ringbtl">Ring it</span></div></div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">DEVICES · pod + your bottles</div>
-    <div class="brow2"><span class="av" style="background:#46e0d2">P</span><div class="ftxt"><b>Pod #1</b> · docked on "Daily 750 ml"</div></div>
+    <div class="brow2"><span class="av" style="background:#46e0d2">P</span><div class="ftxt"><b>Pod #1</b> · docked on "Daily 600 ml"</div></div>
     <div class="brow2" id="addbtl"><span class="av" style="background:rgba(255,255,255,.12);color:#9fd9e6">+</span><div class="ftxt">Add another bottle</div></div>
     <div class="brow"><span>Firmware</span><b>v9.0 · up to date</b></div>
     <div class="brow" id="calib"><span>Calibrate scale</span><b>›</b></div>
@@ -1967,6 +1978,7 @@ function logDevCmd(cmd, cls, note){ const el=document.getElementById('dpCmdLog')
   el.insertBefore(row, el.firstChild); while(el.children.length>40) el.removeChild(el.lastChild); }
 function sendDevCmd(cmd){ cmd=(cmd||'').trim(); if(!cmd) return;
   if(!POD.connected){ logDevCmd(cmd,'lgErr','pod not connected'); toast('Connect the pod first'); return; }
+  if(/^TARE$/i.test(cmd) && typeof tareBottle==='function'){ tareBottle(); logDevCmd('→ TARE','lgOk','app-side zero applied · bottle now reads 0'); return; }   // app-side tare regardless of firmware
   if(!POD.cmdChar){ logDevCmd(cmd,'lgErr','no 0x2A59 command characteristic — firmware must expose it'); toast('No command channel on this pod'); return; }
   logDevCmd('→ '+cmd,'lgSent');
   if(typeof podCommandAck==='function'){ podCommandAck(cmd, 2000).then(r=>{
@@ -2042,7 +2054,7 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
   $('ringbtl').onclick=()=>{ fxPodVibe(120,600,'PULSE'); if(typeof glowFlash==='function') glowFlash(0x46e0d2); fxVibratePhone([0,120,60,120]); toast('Ringing your bottle…'); };
   $('addbtl').onclick=()=>toast('Scan a new ORQA bottle to register it');
   { const bdc=$('bdisc'); if(bdc) bdc.onclick=()=>disconnectPod(); }
-  const doTare=()=>{ if(!POD.connected){ toast('Connect the pod first'); return; } if(podCommand('TARE')){ fxVibratePhone(50); notify('<span class="nic">⊘</span> Taring — empty the bottle to zero the scale', '#9fd9e6'); } else { toast('No command channel — reconnect the pod'); } };
+  const doTare=()=>{ if(!POD.connected){ toast('Connect the pod first'); return; } tareBottle(); };   // app-side zero (also sends firmware TARE)
   const bt=$('btare'); if(bt) bt.onclick=doTare;
   $('calib').onclick=doTare;
   $('nfc').onclick=()=>toast('Tap your phone to the pod to pair via NFC');
@@ -2134,7 +2146,22 @@ window.__noteCenter=openNoteCenter;
 const POD = { connected:false, mock:false, weight:0, waterMl:0, sips:0, totalMl:0,
   refills:0, refillMl:0, disposes:0, disposeMl:0, tiltDeg:0, tilt:false, stable:false,
   ax:0, ay:0, az:0, state:'IDLE', battery:null, voltage:null, goalMl:null, pct:0, _mt:null, cmdChar:null, device:null,
+  tareG:null,     // 2-point calibration, EMPTY point: raw gross reading of the empty bottle
+  calFullG:null,  // 2-point calibration, FULL point: raw gross reading of the full bottle
   _battWarned:false, _battHist:[], charging:false, fastCharge:false, _chgNotified:false, _wasCharging:false, _connecting:false, _lastFrame:0 };
+// Net water the app trusts: when an app-side tare baseline exists, compute it from the raw gross
+// weight (W, grams ≈ mL) so tare works even if the pod firmware never zeroed. Otherwise fall back
+// to the firmware's net VOL.
+// Water the app trusts, from a 2-point weight calibration (empty + full):
+//   - both points set → linear map raw→ml across the span, so ANY scale units work: ml = (raw−empty)/(full−empty)*capacity
+//   - empty only (tare)  → net = raw − empty (assumes 1 g ≈ 1 ml)
+//   - neither            → fall back to the firmware's net VOL
+function netWaterMl(){ const raw=POD.weight;
+  if(raw!=null && POD.tareG!=null && POD.calFullG!=null && (POD.calFullG-POD.tareG)>1)
+    return Math.max(0, Math.min(HS.capacity, Math.round((raw - POD.tareG)/(POD.calFullG - POD.tareG) * HS.capacity)));
+  if(raw!=null && POD.tareG!=null) return Math.max(0, Math.round(raw - POD.tareG));
+  return Math.round(POD.waterMl||0); }
+window.__netWaterMl=netWaterMl;
 // ── battery: accurate LIVE % when connected + a one-shot <40% charge warning ──
 const BATT_WARN=40, BATT_REARM=45;               // hysteresis so it never spams around the threshold
 function lipoVolts(pct){ if(pct==null) return null;            // inverse of the firmware lipoPct() LUT (demo only)
@@ -2567,18 +2594,34 @@ window.__podFeed={ live:podLive, sip:podSip, evt:podEvt };
 // raw variable — we publish a steady, rounded "final" reading: a median over a
 // short window (kills spikes) → quantise to 5 ml → only move once past a margin
 // (deadband), and snap at once on a genuine step or when the pod flags STBL=1.
-function makeStab(quantum, margin, win){ win=win||15; return { pub:null, buf:[],
-  reset(){ this.pub=null; this.buf.length=0; },                              // tare / re-calibrate → forget the old window
-  feed(raw, snap){ raw = isFinite(raw) ? raw : (this.pub||0);
-    if(this.pub!=null && Math.abs(raw-this.pub)>40) this.buf.length=0;       // a REAL step (sip/refill) → drop the stale window, snap fast
+// A NEW level must hold steady for STAB_CONFIRM consecutive samples that are BOTH stable and
+// upright before it's accepted — this rejects the transient spikes a load cell produces from tilt,
+// bumps and transit. Higher = more accurate (but slower to register a real change). Tunable live.
+let STAB_CONFIRM = 12;        // was effectively ~6 (the firmware's stable flag); bumped for accuracy
+const TILT_MAX   = 25;        // degrees — above this the bottle is too tilted to trust the scale
+function makeStab(quantum, margin, win){ win=win||15; return { pub:null, buf:[], _cand:null, _cn:0, confirmN:STAB_CONFIRM,
+  reset(){ this.pub=null; this.buf.length=0; this._cand=null; this._cn=0; },   // tare / re-calibrate → forget the old window
+  feed(raw, ok){ raw = isFinite(raw) ? raw : (this.pub||0);
     this.buf.push(raw); if(this.buf.length>win) this.buf.shift();
-    const s=this.buf.slice().sort((a,b)=>a-b);                               // ROUGH AVERAGE: median of a wide window kills the
-    const med=s[(s.length-1)>>1];                                           // ongoing atmospheric load-cell noise, no spikes
-    const cand=Math.round(med/quantum)*quantum;                             // → snap to a clean WHOLE-number slot (no decimals/halves)
-    if(this.pub==null || snap || Math.abs(cand-this.pub)>=margin) this.pub=cand;
-    return Math.max(0, Math.round(this.pub)); } }; }                         // always a whole number
-const waterStab=makeStab(5,8,11), weightStab=makeStab(5,8,11);   // 5 ml slots · 8 ml deadband · 11-sample rough average (smooth vs noise, still follows real changes)
-function commitWater(){ POD._stableMl=waterStab.feed(POD.waterMl||0, POD.stable); POD._stableG=weightStab.feed(POD.weight||POD.waterMl||0, POD.stable); return POD._stableMl; }
+    const s=this.buf.slice().sort((a,b)=>a-b); const med=s[(s.length-1)>>1];   // median window kills ongoing load-cell noise
+    const cand=Math.round(med/quantum)*quantum;                                // snap to a clean whole-number slot
+    if(this.pub==null){ this.pub=cand; return Math.max(0,Math.round(this.pub)); }
+    if(!ok){ this._cand=null; this._cn=0; return Math.max(0,Math.round(this.pub)); }      // moving OR tilted → hold last trusted level, don't count
+    if(Math.abs(cand-this.pub) < margin){ this._cand=null; this._cn=0; return Math.max(0,Math.round(this.pub)); }   // within deadband → hold
+    // a change beyond the deadband, while stable+upright → require it to persist confirmN samples
+    if(this._cand!=null && Math.abs(cand-this._cand)<=quantum) this._cn++; else { this._cand=cand; this._cn=1; }
+    if(this._cn>=this.confirmN){ this.pub=this._cand; this._cand=null; this._cn=0; }       // confirmed → accept the new level
+    return Math.max(0, Math.round(this.pub)); } }; }
+const waterStab=makeStab(5,8,11), weightStab=makeStab(5,8,11);   // 5 ml slots · 8 ml deadband · 11-sample median
+window.__setStabConfirm=(n)=>{ STAB_CONFIRM=Math.max(2, n|0); waterStab.confirmN=STAB_CONFIRM; weightStab.confirmN=STAB_CONFIRM; return STAB_CONFIRM; };
+// App-side stillness backup: if the last handful of raw readings barely move, the bottle is
+// settled even if the firmware's STBL flag is unreliable. Guards against a stuck reading.
+let _wHist=[];
+function _appStill(){ const w=POD.weight; if(w==null) return false; _wHist.push(w); if(_wHist.length>8) _wHist.shift();
+  return _wHist.length>=5 && (Math.max(..._wHist)-Math.min(..._wHist)) <= 6; }   // ≤6 g spread over ~8 frames ≈ still
+function commitWater(){ const upright=(POD.tiltDeg||0)<TILT_MAX; const ok=(POD.stable || _appStill()) && upright;   // trust the scale only when still AND upright
+  POD._stableMl=waterStab.feed(netWaterMl(), ok); POD._stableG=weightStab.feed(POD.weight||POD.waterMl||0, ok); return POD._stableMl; }
+window.__commitWater=commitWater;
 function stableWaterMl(){ return POD._stableMl!=null ? POD._stableMl : Math.round(POD.waterMl||0); }
 function stableWeightG(){ return POD._stableG!=null ? POD._stableG : Math.round(POD.weight||0); }
 function bottlePct(){ return Math.max(0, Math.min(100, Math.round(stableWaterMl()/Math.max(1,HS.capacity)*100))); }
@@ -2586,16 +2629,39 @@ function bottlePct(){ return Math.max(0, Math.min(100, Math.round(stableWaterMl(
 // removed / consumed) from that zero. Also clears the app's averaging windows so the reading
 // re-settles cleanly from the new baseline.
 function tareBottle(){
-  const ok = podCommand('TARE');                 // pod firmware auto-learns the empty bottle + upright gravity reference
+  podCommand('TARE');                            // also tell the firmware (harmless if it doesn't handle it)
+  // APP-SIDE tare: remember the current gross weight as the empty-bottle baseline, so net water
+  // reads 0 now and tracks from here regardless of whether the firmware zeroed its own scale.
+  POD.tareG = (POD.weight!=null ? POD.weight : (POD.waterMl||0));
   waterStab.reset(); weightStab.reset(); POD._stableMl=null; POD._stableG=null;
-  if(POD.mock){ POD.waterMl=0; POD.weight=0; }   // demo: an empty, freshly-tared bottle reads 0
+  if(POD.mock){ POD.waterMl=0; POD.weight=0; POD.tareG=0; }   // demo: an empty, freshly-tared bottle reads 0
   POD._unexBase=0; POD._evtAt=Date.now();
   const tp=document.getElementById('tareProj'); if(tp) tp.dataset.tared='1';   // activate the live water projection
-  commitWater(); if(typeof refreshLive==='function') refreshLive();
+  commitWater(); if(typeof refreshLive==='function') refreshLive(); if(typeof saveState==='function') saveState();
   fxVibratePhone(50);
-  notify('<span class="nic">⊘</span> Bottle tared — empty weight calibrated. Now projecting water from <b>0 ml</b>.', '#9fd9e6');
+  notify('<span class="nic">⊘</span> Bottle tared — empty weight zeroed. Now tracking water from <b>0 ml</b> (full ≈ '+HS.capacity+' ml).', '#9fd9e6');
 }
 window.__tareBottle=tareBottle;
+// 2-point calibration: capture the raw scale reading at EMPTY and at FULL. The difference in
+// weight is mapped straight to the bottle's capacity in ml, so sips read out in real ml.
+function calSet(which){
+  if(!POD.connected){ toast('Connect the pod first'); return; }
+  const upright=(POD.tiltDeg||0)<TILT_MAX;
+  if(!(POD.stable && upright)){ toast('Hold the bottle upright & still, then tap again'); fxVibratePhone([0,60,50,60]); return; }
+  const raw = Math.round((POD._stableG!=null ? POD._stableG : (POD.weight!=null ? POD.weight : (POD.waterMl||0))));   // use the settled weight
+  if(which==='empty'){ POD.tareG=Math.round(raw);
+    notify('<span class="nic">①</span> Empty calibrated at <b>'+Math.round(raw)+' g</b>. Now fill the bottle and tap “Set full”.', '#9fd9e6'); }
+  else { POD.calFullG=Math.round(raw);
+    const span=(POD.tareG!=null)?Math.round(raw-POD.tareG):null;
+    notify('<span class="nic">②</span> Full calibrated at <b>'+Math.round(raw)+' g</b>'+(span!=null?' · span <b>'+span+' g</b> → '+HS.capacity+' ml':'')+'. Calibration complete.', '#46e0d2'); }
+  waterStab.reset(); weightStab.reset(); POD._stableMl=null; POD._stableG=null;
+  commitWater(); if(typeof refreshLive==='function') refreshLive(); if(typeof saveState==='function') saveState(); fxVibratePhone(40);
+  if(typeof refreshDevPod==='function') refreshDevPod();
+}
+function calClear(){ POD.tareG=null; POD.calFullG=null; waterStab.reset(); weightStab.reset(); POD._stableMl=null;
+  commitWater(); if(typeof refreshLive==='function') refreshLive(); if(typeof saveState==='function') saveState();
+  toast('Calibration cleared'); if(typeof refreshDevPod==='function') refreshDevPod(); }
+window.__calSet=calSet; window.__calClear=calClear;
 
 // 2) HISTORY logs (the water ledger the user wants to verify) ---------------
 const SIPLOG=[], REFILLLOG=[], DISPOSELOG=[];          // newest first
@@ -2718,7 +2784,8 @@ function logUnexplained(ml){ ml=Math.round(+ml); if(!Number.isFinite(ml)||ml<=0)
 // frame (so the raw load cell visibly ticks while the layout stays steady).
 const TELE=[ ['RAW LOAD','traw','raw'],['NET WATER','tnet',''],['FILL','tfill',''],['TILT','ttilt',''],['STABLE','tstb',''],['STATE','tstate',''],['MOTION x·y·z','tmot','sm'],['BATTERY','tbatt',''] ];
 function buildTeleGrid(el){ el.innerHTML=TELE.map(c=>'<div class="teleCard '+(c[2]||'')+'"><span class="tlk">'+c[0]+'</span><b class="tlv" id="'+c[1]+'"></b></div>').join(''); el.dataset.built='1'; }
-function updateDevLive(){ const dev=document.getElementById('dev'); const el=document.getElementById('devLive'); if(!el || !dev || !dev.classList.contains('open')) return;
+function updateDevLive(){ const dev=document.getElementById('dev'); if(dev&&dev.classList.contains('open')&&typeof updateCalStat==='function') updateCalStat();
+  const el=document.getElementById('devLive'); if(!el || !dev || !dev.classList.contains('open')) return;
   if(!POD.connected){ el.innerHTML='<div class="teleEmpty">— pod not connected —</div>'; el.dataset.built=''; return; }
   if(el.dataset.built!=='1') buildTeleGrid(el);
   const set=(id,v)=>{ const n=document.getElementById(id); if(n && n.textContent!==String(v)) n.textContent=v; };
@@ -2900,6 +2967,17 @@ function runBottleShow(btn){ if(_showOn) return;
 window.__bottleShow=runBottleShow;
 $('devShow').onclick=()=>runBottleShow($('devShow'));
 { const tb=$('devTareBottle'); if(tb) tb.onclick=tareBottle; }
+{ const e=$('calEmpty'); if(e) e.onclick=()=>{ calSet('empty'); updateCalStat(); }; }
+{ const f=$('calFull');  if(f) f.onclick=()=>{ calSet('full');  updateCalStat(); }; }
+{ const c=$('calClearBtn'); if(c) c.onclick=()=>{ calClear(); updateCalStat(); }; }
+{ const s=$('devStab'), v=$('devStabV'); if(s&&v){ const upd=()=>{ v.textContent=s.value; if(window.__setStabConfirm) window.__setStabConfirm(+s.value); };
+    s.value=String(STAB_CONFIRM); v.textContent=String(STAB_CONFIRM); s.addEventListener('input', upd); } }
+function updateCalStat(){ const el=$('calStat'); if(!el) return;
+  const e=POD.tareG, f=POD.calFullG;
+  if(e!=null && f!=null){ const span=Math.round(f-e); el.innerHTML='✓ empty <b>'+Math.round(e)+'g</b> · full <b>'+Math.round(f)+'g</b> · span <b>'+span+'g</b> → '+HS.capacity+' ml · now <b>'+netWaterMl()+' ml</b>'; el.className='calStat ok'; }
+  else if(e!=null){ el.innerHTML='① empty set <b>'+Math.round(e)+'g</b> — now fill the bottle &amp; tap “Set full”'; el.className='calStat half'; }
+  else { el.textContent='not calibrated'; el.className='calStat'; } }
+window.__updateCalStat=updateCalStat;
 
 // 10) PERSISTENCE + DAY BOUNDARY + EXPLICIT DEMO MODE -----------------------
 // Real state lives in localStorage and survives reload/crash; every day is
@@ -2912,7 +2990,8 @@ let _stDate=new Date().toDateString();
 let _saveT=null;
 function _persistNow(){ try{
   ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
-    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
+    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit, capacity:HS.capacity },
+    tareG:(POD.tareG==null?null:POD.tareG), calFullG:(POD.calFullG==null?null:POD.calFullG),
     lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
     sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
     refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
@@ -2930,7 +3009,9 @@ function loadPersisted(reset){ try{
     SIPLOG.length=0; REFILLLOG.length=0; DISPOSELOG.length=0; lastSipAt=null; POD._sync=null; }
   const s=JSON.parse(ORQA.store.getItem(ST_KEY)||'null'); if(!s||s.v!==1) return;
   if(!DAYHIST.length) (s.hist||[]).forEach(h=>DAYHIST.push(h));
-  const h=s.hs||{}; HS.goal=h.goal||HS.goal;
+  const h=s.hs||{}; HS.goal=h.goal||HS.goal; if(h.capacity) HS.capacity=h.capacity;
+  if(s.tareG!==undefined && s.tareG!==null) POD.tareG=s.tareG;   // keep the calibration across reloads
+  if(s.calFullG!==undefined && s.calFullG!==null) POD.calFullG=s.calFullG;
   if(s.date!==_stDate){                              // app last ran on a previous day → archive it, start today fresh
     archiveDay(s.date, h, (s.sips||[]).length);
     HS.streak=((h.intake||0)>=(h.goal||HS.goal)) ? (h.streak||0)+1 : 0;
@@ -3050,7 +3131,9 @@ document.addEventListener('click', e=>{ const t=e.target.closest('[data-fxtoggle
   toast((ch==='rgb'?'RGB light ':ch==='vibe'?'Vibration ':'Sound ')+(FX[ch]?'on':'off')); });
 fxSyncToggleUI();
 $('devCap').addEventListener('input', e=>{ HS.capacity=+e.target.value; $('devCapV').textContent=e.target.value+'ml'; refreshBottleLive(); });
-document.querySelectorAll('#dev [data-cmd]').forEach(b=>b.addEventListener('click',()=>{ const c=b.dataset.cmd; podCommand(c); toast((POD.connected?'→ bottle: ':'(connect pod first) ')+c); }));
+document.querySelectorAll('#dev [data-cmd]').forEach(b=>b.addEventListener('click',()=>{ const c=b.dataset.cmd;
+  if(/^TARE$/i.test(c)){ if(!POD.connected){ toast('Connect the pod first'); return; } tareBottle(); return; }   // app-side tare
+  podCommand(c); toast((POD.connected?'→ bottle: ':'(connect pod first) ')+c); }));
 $('devPair').addEventListener('click', ()=>connectPod());
 $('devUnpair').addEventListener('click', ()=>disconnectPod());
 $('devGoal').addEventListener('input', e=>{ window.__setGoalPct(+e.target.value/100); $('devGoalV').textContent=e.target.value+'%'; });
