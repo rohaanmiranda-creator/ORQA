@@ -634,6 +634,13 @@
   .lightBtns { display:flex; gap:8px; margin:9px 0 2px; }
   .lightBtns .chip { flex:1; text-align:center; }
   .lightBtns #bLightApply { background:rgba(70,224,210,.16); border-color:rgba(70,224,210,.4); color:#bff7ee; }
+  /* account section */
+  .acctRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 10px; }
+  .acctInfo { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .acctInfo b { font-size:14px; color:#eafcff; }
+  .acctInfo span { font-size:11.5px; color:#9fd9e6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .acctRole { flex:0 0 auto; font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:#08222c; background:#46e0d2; border-radius:20px; padding:3px 10px; font-weight:700; }
+  #acctLogout { color:#ffb4b4; border-color:rgba(255,140,140,.35); }
   .devRow { display:flex; align-items:center; gap:10px; margin:9px 0; font-size:12px; color:#bfe6f0; }
   .devRow span:first-child { width:48px; }
   .devRow input[type=range] { flex:1; accent-color:#46e0d2; }
@@ -1910,6 +1917,12 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
     <div class="brow" id="updateRow"><span>Update mode <small style="color:#7f9aa8">· flash from Mac</small></span><b id="bupdate" style="color:#9fd9e6;cursor:pointer">Enter ›</b></div>
     <div class="brow" id="bdiscRow" style="${POD.connected?'':'display:none'}"><span>Bluetooth</span><b id="bdisc" style="color:#ff8f8f;cursor:pointer">Disconnect ›</b></div>
   </div>
+  <div class="insHair"></div>
+  <div class="insSec"><div class="lbl">ACCOUNT</div>
+    <div class="acctRow"><div class="acctInfo"><b id="acctName">—</b><span id="acctEmail">—</span></div><span class="acctRole" id="acctRole"></span></div>
+    <button class="devBtn" id="acctLogout">⇥ Log out · switch account</button>
+    <div class="bsub" id="acctSync" style="margin-top:8px">Signed in on this device</div>
+  </div>
 </div>`; }
 // iOS wall: every iOS browser (Safari AND Chrome) uses Apple WebKit, which ships NO
 // Web Bluetooth — so navigator.bluetooth is undefined and no permission prompt can appear.
@@ -1981,6 +1994,16 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
     panelBody.querySelectorAll('#bGradScheme .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bGradScheme .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); st.scheme=c.dataset.g; applyLight(); });
     const ap=$('bLightApply'); if(ap) ap.onclick=applyLight;
     const of=$('bLightOff'); if(of) of.onclick=()=>{ if(window.__lightFxStop) window.__lightFxStop(); toast('Light off'); };
+  }
+  { // Account section: show the signed-in user + log out / switch account
+    const u=(window.ORQA&&ORQA.auth&&ORQA.auth.user)||null;
+    const nm=$('acctName'), em=$('acctEmail'), rl=$('acctRole'), sy=$('acctSync');
+    if(nm) nm.textContent=(u&&u.name)||'Guest';
+    if(em) em.textContent=(u&&u.email&&u.email!=='guest')?u.email:'not signed in';
+    if(rl){ const r=(u&&u.role)||'guest'; rl.textContent=r; rl.style.display=(r==='guest')?'none':''; }
+    if(sy){ const cloud=(window.ORQA&&ORQA.auth&&ORQA.auth.supaEnabled&&ORQA.auth.supaEnabled());
+      sy.textContent=cloud?'☁ Synced to your account (cloud)':'Saved to this account on this device'; }
+    const lo=$('acctLogout'); if(lo) lo.onclick=()=>{ try{ if(window.ORQA&&ORQA.auth&&ORQA.auth.signOut) ORQA.auth.signOut(); }catch(e){ location.reload(); } };
   }
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
   panelBody.querySelectorAll('.btog').forEach(t=>t.onclick=()=>{ const i=t.querySelector('i'); i.classList.toggle('on'); const on=i.classList.contains('on'); if(t.dataset.t==='haptic'){ if(on){ fxPodVibe(60,200); fxVibratePhone(60); } } else { if(on && FX.sound) podCommand('BUZZ:1'); } toast((t.dataset.t==='haptic'?'Haptic ':'Buzzer ')+(on?'on':'off')); });
