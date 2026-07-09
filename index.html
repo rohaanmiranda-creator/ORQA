@@ -2003,7 +2003,9 @@ function showPanel(name){
   panelBody.classList.remove('pbIn'); void panelBody.offsetWidth; panelBody.classList.add('pbIn');   // crossfade content on tab switches
   document.body.classList.add('panel-open'); panel.classList.add('open'); panel.scrollTop=0; }
 function hidePanel(){ document.body.classList.remove('panel-open'); panel.classList.remove('open'); }
+let devDrawerLP=false;   // set true when a Bottle-icon long-press opened the dev drawer, so the tap doesn't also switch tabs
 document.querySelectorAll('#tabbar .tab').forEach(tb=>tb.addEventListener('click',()=>{
+  if(tb.dataset.tab==='bottle' && devDrawerLP){ devDrawerLP=false; return; }   // long-press = dev drawer, not a tab switch
   document.querySelectorAll('#tabbar .tab').forEach(x=>x.classList.remove('active')); tb.classList.add('active');
   const n=tb.dataset.tab; activeTab=n; resetOverlays();
   if(n==='home'){ hidePanel(); updateHome(); } else { showPanel(n); }
@@ -2914,12 +2916,15 @@ setInterval(checkDayRollover, 60000);                 // catch midnight while th
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ checkDayRollover(); refreshHomeStats(); } });
 setInterval(saveState, 30000);                        // safety net alongside per-event saves
 
-// ===== Dev / demo panel (hidden: long-press the ORQA logo) =====
-const devEl=$('dev'), brandEl=$('brand');
-brandEl.style.pointerEvents='auto'; brandEl.style.cursor='pointer';
+// ===== Dev / demo panel (hidden: long-press the Bottle tab icon) =====
+const devEl=$('dev');
 let lpT=null;
-brandEl.addEventListener('pointerdown', ()=>{ lpT=setTimeout(()=>{ devEl.classList.add('open'); updateDevLive(); }, 600); });
-['pointerup','pointerleave','pointercancel'].forEach(ev=>brandEl.addEventListener(ev,()=>clearTimeout(lpT)));
+const _bottleTab=document.querySelector('#tabbar .tab[data-tab="bottle"]');
+if(_bottleTab){
+  _bottleTab.addEventListener('pointerdown', ()=>{ devDrawerLP=false;
+    lpT=setTimeout(()=>{ devDrawerLP=true; devEl.classList.add('open'); if(typeof updateDevLive==='function') updateDevLive(); }, 600); });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>_bottleTab.addEventListener(ev,()=>clearTimeout(lpT)));
+}
 $('devClose').addEventListener('click', ()=>devEl.classList.remove('open'));
 
 // glowFlash now only relays the colour to the physical bottle LED — no on-screen glow.
