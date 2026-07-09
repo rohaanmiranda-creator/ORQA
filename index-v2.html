@@ -627,6 +627,13 @@
     border:1px solid rgba(150,210,225,.14); padding:7px 9px; font-family:ui-monospace,Menlo,monospace; font-size:11px; line-height:1.7; }
   .dpLogEmpty { color:#6f93a2; font-style:italic; }
   .dpLog .lgSent { color:#bfe6f0; } .dpLog .lgOk { color:#7ff0e4; } .dpLog .lgWarn { color:#ffb45a; } .dpLog .lgErr { color:#ff8f8f; }
+  /* light customization */
+  .lightRow { display:flex; align-items:center; gap:10px; margin:6px 0 4px; }
+  .lightRow input[type=color] { width:40px; height:34px; padding:0; border:1px solid rgba(150,210,225,.3); border-radius:9px; background:none; cursor:pointer; flex:0 0 auto; }
+  .lightModes, .gradSchemes { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+  .lightBtns { display:flex; gap:8px; margin:9px 0 2px; }
+  .lightBtns .chip { flex:1; text-align:center; }
+  .lightBtns #bLightApply { background:rgba(70,224,210,.16); border-color:rgba(70,224,210,.4); color:#bff7ee; }
   .devRow { display:flex; align-items:center; gap:10px; margin:9px 0; font-size:12px; color:#bfe6f0; }
   .devRow span:first-child { width:48px; }
   .devRow input[type=range] { flex:1; accent-color:#46e0d2; }
@@ -1867,8 +1874,18 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
-    <div class="bsub">Glow colour</div>
-    <div class="swatches" id="bglow"><span style="background:#46e0d2" data-c="0x46e0d2"></span><span style="background:#3b82f6" data-c="0x3b82f6"></span><span style="background:#22c55e" data-c="0x22c55e"></span><span style="background:#f43f5e" data-c="0xf43f5e"></span><span style="background:#ffffff" data-c="0xffffff"></span></div>
+    <div class="bsub">Light · colour &amp; mode</div>
+    <div class="lightRow">
+      <input type="color" id="bLightColor" value="#46e0d2" aria-label="custom colour">
+      <div class="swatches" id="bglow"><span style="background:#46e0d2" data-c="46e0d2"></span><span style="background:#3b82f6" data-c="3b82f6"></span><span style="background:#22c55e" data-c="22c55e"></span><span style="background:#f43f5e" data-c="f43f5e"></span><span style="background:#ffd166" data-c="ffd166"></span><span style="background:#ffffff" data-c="ffffff"></span></div>
+    </div>
+    <div class="chips lightModes" id="bLightMode">
+      <span class="chip on" data-m="solid">Solid</span><span class="chip" data-m="breathe">Breathe</span><span class="chip" data-m="pulse">Pulse</span><span class="chip" data-m="rainbow">Rainbow</span><span class="chip" data-m="gradient">Gradient</span><span class="chip" data-m="ring">Ring wave</span>
+    </div>
+    <div class="chips gradSchemes" id="bGradScheme" style="display:none">
+      <span class="chip on" data-g="aurora">Aurora</span><span class="chip" data-g="sunset">Sunset</span><span class="chip" data-g="ocean">Ocean</span><span class="chip" data-g="forest">Forest</span>
+    </div>
+    <div class="lightBtns"><button class="chip" id="bLightApply">✦ Apply to bottle</button><button class="chip" id="bLightOff">Off</button></div>
     <div class="bsub">Reminder style</div>
     <div class="chips" id="bstyle"><span class="chip on" data-s="Gentle">Gentle</span><span class="chip" data-s="Standard">Standard</span><span class="chip" data-s="Urgent">Urgent</span><span class="chip" data-s="Custom">Custom…</span></div>
     <div class="bsub">Feedback channels — turn any off (silences both pod + phone)</div>
@@ -1952,7 +1969,19 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
         ci.onkeydown=e=>{ if(e.key==='Enter'){ sendDevCmd(ci.value); ci.value=''; } }; } }
     updateDpBanner(); refreshDevPod(); }
   { const rb=$('ringbtl'); if(rb && !$('btele')){ const tb=document.createElement(rb.tagName); tb.id='btele'; tb.className=rb.className; tb.textContent='📡 Live telemetry stream'; rb.parentNode.insertBefore(tb, rb.nextSibling); tb.onclick=()=>{ if(window.__liveMon) window.__liveMon(true); }; } }   // telemetry moved here from the old floating chip
-  panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ if(typeof glowFlash==='function') glowFlash(parseInt(s.dataset.c)); toast('Bottle glow set'); });
+  { // Light panel: colour picker + swatches + mode chips (Solid/Breathe/Pulse/Rainbow/Gradient/Ring) + gradient schemes
+    const st={ color:'46e0d2', mode:'solid', scheme:'aurora' };
+    const applyLight=()=>{ if(!POD.connected){ toast('Connect the pod first'); return; }
+      if(window.__runLight) window.__runLight(st.color, st.mode, st.mode==='ring'?4000:2600, st.scheme);
+      toast('Light · '+st.mode+(st.mode==='gradient'?' · '+st.scheme:'')); };
+    const cp=$('bLightColor'); if(cp) cp.oninput=()=>{ st.color=cp.value.replace('#','').toLowerCase(); };
+    panelBody.querySelectorAll('#bglow span').forEach(s=>s.onclick=()=>{ st.color=s.dataset.c; if(cp) cp.value='#'+s.dataset.c; applyLight(); });
+    panelBody.querySelectorAll('#bLightMode .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bLightMode .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); st.mode=c.dataset.m;
+      const gs=$('bGradScheme'); if(gs) gs.style.display=(st.mode==='gradient')?'flex':'none'; applyLight(); });
+    panelBody.querySelectorAll('#bGradScheme .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bGradScheme .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); st.scheme=c.dataset.g; applyLight(); });
+    const ap=$('bLightApply'); if(ap) ap.onclick=applyLight;
+    const of=$('bLightOff'); if(of) of.onclick=()=>{ if(window.__lightFxStop) window.__lightFxStop(); toast('Light off'); };
+  }
   panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
   panelBody.querySelectorAll('.btog').forEach(t=>t.onclick=()=>{ const i=t.querySelector('i'); i.classList.toggle('on'); const on=i.classList.contains('on'); if(t.dataset.t==='haptic'){ if(on){ fxPodVibe(60,200); fxVibratePhone(60); } } else { if(on && FX.sound) podCommand('BUZZ:1'); } toast((t.dataset.t==='haptic'?'Haptic ':'Buzzer ')+(on?'on':'off')); });
   $('ringbtl').onclick=()=>{ fxPodVibe(120,600,'PULSE'); if(typeof glowFlash==='function') glowFlash(0x46e0d2); fxVibratePhone([0,120,60,120]); toast('Ringing your bottle…'); };
@@ -2811,20 +2840,23 @@ $('devShow').onclick=()=>runBottleShow($('devShow'));
 // Real state lives in localStorage and survives reload/crash; every day is
 // archived and zeroed at calendar midnight; demo data only exists behind an
 // explicit opt-in with a visible badge and is NEVER persisted.
-const ST_KEY='orqaState_v1';
+let ST_KEY='orqaState_v1::anon';                     // scoped per signed-in account (re-keyed on login)
+function accountStKey(email){ return 'orqaState_v1::'+(email||'anon'); }
 const DAYHIST=[];                                    // last 30 archived days {date,intake,wasted,goal,goalHit,sips}
 let _stDate=new Date().toDateString();
 let _saveT=null;
+function _persistNow(){ try{
+  ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
+    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
+    lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
+    sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
+    refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
+    disposes:DISPOSELOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
+    hist:DAYHIST.slice(0,30) }));
+  }catch(e){ console.warn('[persist] save failed', e); } }
 function saveState(){ if(POD.mock) return;           // demo mutations must never overwrite the real day
-  clearTimeout(_saveT); _saveT=setTimeout(()=>{ try{
-    ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
-      hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
-      lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
-      sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
-      refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
-      disposes:DISPOSELOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
-      hist:DAYHIST.slice(0,30) }));
-  }catch(e){ console.warn('[persist] save failed', e); } }, 800); }
+  clearTimeout(_saveT); _saveT=setTimeout(_persistNow, 800); }
+function saveStateNow(){ if(POD.mock) return; clearTimeout(_saveT); _persistNow(); }   // immediate flush (seed/clear/critical)
 function archiveDay(dateStr, hs, sipCount){ DAYHIST.unshift({ date:dateStr, intake:Math.round(hs.intake||0),
   wasted:Math.round(hs.wasted||0), goal:hs.goal||HS.goal, goalHit:(hs.intake||0)>=(hs.goal||HS.goal), sips:sipCount||0 });
   while(DAYHIST.length>30) DAYHIST.pop(); }
@@ -2914,6 +2946,16 @@ function seedDemoHistory(){
 window.__podSim={ podLive, podSip, podEvt, podDrink, podRefill, podDispose,
   offerDemoMode, exitDemoMode, startMockPod, checkDayRollover, dayResetLocal,
   loadPersisted, saveState, HS, POD, SIPLOG, REFILLLOG, DISPOSELOG, DAYHIST };
+// Re-key persisted state to a specific account and reload that account's data. Called on login
+// so each account keeps its own hydration history on the device. First login for a real account
+// adopts any legacy global-key data so nothing is lost on upgrade.
+window.__loadAccount=function(email){
+  const key=accountStKey(email);
+  try{ if(email && email!=='anon' && email!=='guest' && !ORQA.store.getItem(key)){
+    const legacy=ORQA.store.getItem('orqaState_v1'); if(legacy){ ORQA.store.setItem(key, legacy); } } }catch(e){}
+  ST_KEY=key;
+  try{ loadPersisted(true); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats(); if(typeof refreshBottleChip==='function') refreshBottleChip(); }catch(e){ console.warn('[account load]', e); }
+};
 loadPersisted(true);                                  // restore the real day (archives yesterday if the app slept past midnight)
 commitWater(); classifyAction(); updateHome(); refreshHomeStats();
 setInterval(()=>{ if(!document.hidden) refreshHomeStats(); }, 30000);    // keep "Xm ago" fresh
@@ -2973,14 +3015,14 @@ function seedDemoMonth(){
   [[7,42,190],[8,55,120],[10,12,150],[11,40,90],[12,30,140],[14,15,110],[15,50,160]].forEach(([h,m,ml])=>{
     const t=new Date(now); t.setHours(h,m,0,0); if(t<=now) SIPLOG.push({ t, ml, dur:(2+Math.round(Math.random()*4))*1000, after:0, before:ml, action:'In hand', health:null }); });
   SIPLOG.sort((a,b)=>b.t-a.t); lastSipAt=SIPLOG.length?SIPLOG[0].t:null;
-  saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  saveStateNow(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
   if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('month');
   toast('Seeded 1 month of demo data · '+HS.streak+'-day streak');
   notify('<span class="nic">🗓</span> <b>Demo month loaded</b> · '+HS.streak+'-day streak, 30 days of Insights', '#46e0d2');
 }
 function clearDemoMonth(){ DAYHIST.length=0; SIPLOG.length=0; REFILLLOG.length=0; DISPOSELOG.length=0;
   HS.intake=0; HS.freed=0; HS.donated=0; HS.wasted=0; HS.streak=0; HS._goalHit=false; HS._met=false; lastSipAt=null;
-  try{ ORQA.store.removeItem(ST_KEY); }catch(e){} saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  try{ ORQA.store.removeItem(ST_KEY); }catch(e){} saveStateNow(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
   if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('today');
   toast('Demo data cleared'); }
 $('devSeed').addEventListener('click', seedDemoMonth);
@@ -3675,15 +3717,39 @@ window.__marineReady=true;   // safe to run stepMarineAll now that MREADY exists
   // triad from the picked hue so GRADIENT/DUAL/SPARKLE/FADE look intentional, not mono.
   const MULTI_FX=new Set(['GRADIENT','DUAL','SPARKLE','FADE']);
   function lightPalette(hex){ const h=baseHue(hex); return [hex, hsvHex(h+140), hsvHex(h+220)]; }
-  function runLightFx(hex, mode, ms){
-    if(_lt){ clearInterval(_lt); _lt=null; }
+  const GRAD_SCHEMES={ aurora:['46e0d2','3b82f6','9a6cff'], sunset:['ffd166','ff6ad5','9a6cff'], ocean:['0ea5e9','22d3ee','2dd4bf'], forest:['22c55e','a3e635','facc15'] };
+  function mixHex(a,b,f){ const na=parseInt(a,16)||0, nb=parseInt(b,16)||0;
+    const r=Math.round(((na>>16&255))*(1-f)+((nb>>16&255))*f), g=Math.round(((na>>8&255))*(1-f)+((nb>>8&255))*f), bl=Math.round((na&255)*(1-f)+(nb&255)*f);
+    return ('000000'+(((r<<16)|(g<<8)|bl)>>>0).toString(16)).slice(-6); }
+  // Time-based modes are streamed FROM THE APP as GLOW:hex frames (~12.5 Hz), so they animate on
+  // ANY firmware that supports a solid GLOW — no per-mode firmware needed. Spatial modes (ring wave,
+  // chase, scanner, comet) need per-LED addressing → the firmware renders those from the LIGHT command.
+  const STREAMED=new Set(['RAINBOW','GRADIENT','BREATHE','PULSE','FADE','GLOW','SOLID']);
+  function runLightFx(hex, mode, ms, scheme){
+    if(_lt){ clearInterval(_lt); _lt=null; } clearTimeout(runLightFx._stop);
     if(!(typeof POD!=='undefined' && POD.cmdChar)) return;     // no pod → on-screen sim only
-    const M=mode.toUpperCase();
-    podCommand('GLOW:'+hex);                                   // v9 fallback: solid colour (LIGHT clears this override → FX wins)
-    if(MULTI_FX.has(M)){ const p=lightPalette(hex);            // v11_demo: dash-separated palette unlocks real multi-colour FX
-      podCommand('LIGHT:'+p[0]+'-'+p[1]+'-'+p[2]+':'+M+':'+ms); }
-    else podCommand('LIGHT:'+hex+':'+M+':'+ms);                // v10 single-colour modes (pod animates natively)
+    const M=(mode||'solid').toUpperCase();
+    ms=ms||2600;
+    if(STREAMED.has(M)){
+      const pal = (M==='GRADIENT'||M==='FADE') ? (GRAD_SCHEMES[scheme]||lightPalette(hex)) : null;
+      const period = M==='RAINBOW'?4200 : M==='BREATHE'?2600 : M==='PULSE'?900 : 3400;
+      const t0=performance.now();
+      const frame=()=>{ const ph=((performance.now()-t0)%period)/period; let col=hex;
+        if(M==='RAINBOW') col=hsvHex(ph*360);
+        else if(M==='BREATHE') col=hexShift(hex, 0.12+0.88*(0.5-0.5*Math.cos(ph*2*Math.PI)));
+        else if(M==='PULSE') col=hexShift(hex, ph<0.5?1:0.1);
+        else if(pal){ const seg=ph*pal.length, i=Math.floor(seg)%pal.length; col=mixHex(pal[i], pal[(i+1)%pal.length], seg-Math.floor(seg)); }
+        podCommand('GLOW:'+col); };
+      frame(); if(M!=='GLOW'&&M!=='SOLID'){ _lt=setInterval(frame, 80); runLightFx._stop=setTimeout(()=>window.__lightFxStop(), ms); }
+      return;
+    }
+    // spatial / native modes — firmware animates from the LIGHT command (ring, chase, scanner, comet, wipe, disco, strobe, flicker)
+    podCommand('GLOW:'+hex);
+    if(MULTI_FX.has(M)){ const p=lightPalette(hex); podCommand('LIGHT:'+p.join('-')+':'+M+':'+ms); }
+    else podCommand('LIGHT:'+hex+':'+M+':'+ms);
+    runLightFx._stop=setTimeout(()=>window.__lightFxStop(), ms);
   }
+  window.__runLight=runLightFx;
   window.__lightFxStop=()=>{ if(_lt){ clearInterval(_lt); _lt=null; } if(typeof POD!=='undefined'&&POD.cmdChar) podCommand('GLOW:AUTO'); };
   // ---- play actions ----
   function light(){ if(typeof FX!=='undefined' && !FX.rgb) return 'muted'; const c=$('fxColor').value, mode=$('fxLightMode').value, ms=+$('fxLightMs').value; const hex=c.replace('#','').toLowerCase();
@@ -3736,7 +3802,9 @@ ORQA.auth = (function(){
   let sb=null, gateEl=null, pending={}, pushT=null;
   const LS='orqaAuth';
 
-  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role); }
+  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role);
+    try{ if(window.__loadAccount) window.__loadAccount(u&&u.email); }catch(e){}   // load THIS account's persisted data
+  }
 
   function buildGate(){
     if(gateEl) return gateEl;
