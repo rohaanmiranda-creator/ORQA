@@ -996,6 +996,8 @@
     <button class="devBtn" id="devFF">» Fast-forward a day (+400 ml)</button>
     <button class="devBtn" id="devStreak">▲ +1 day streak</button>
     <button class="devBtn" id="devDonate">~ Trigger donation milestone</button>
+    <button class="devBtn djBig" id="devSeed">🗓 Seed 1-month demo data</button>
+    <button class="devBtn" id="devClearSeed">⌫ Clear demo data</button>
 
     <h3>WORLD</h3>
     <button class="devBtn" id="devTod">◐ Cycle day / night</button>
@@ -1645,14 +1647,42 @@ $('addBtn').addEventListener('click', ()=>{
 const panel=$('panel'), panelBody=$('panelBody'), panelHead=$('panelHead');
 let activeTab='home';
 const TITLES={ insights:'Insights', coach:'Coach', community:'Pod', bottle:'Bottle' };
-function weekDots(){ const days=['M','T','W','T','F','S','S'], hit=[1,1,1,0,1,1,0]; return days.map((l,i)=>({l,hit:hit[i]})); }
+function weekDots(){ const L=['M','T','W','T','F','S','S'];
+  if(typeof DAYHIST!=='undefined' && DAYHIST.length>=7){ const w=DAYHIST.slice(0,7).reverse(); return L.map((l,i)=>({l,hit:w[i]&&w[i].goalHit?1:0})); }
+  const hit=[1,1,1,0,1,1,0]; return L.map((l,i)=>({l,hit:hit[i]})); }
 const INS={
   today:{ h:"TODAY'S RHYTHM", headline:'<b>62%</b> of your water comes before noon — you fade after 3pm.', bars:[{l:'6a',v:20},{l:'9a',v:85},{l:'12p',v:60},{l:'3p',v:30},{l:'6p',v:48},{l:'9p',v:24}], streak:5, hit:'on track', of:'', sip:35, sips:18 },
   week:{ h:'WHEN YOU DRINK', headline:'Best day <b>Tue</b> · weekends dip ~30%. Mornings carry you.', bars:[{l:'M',v:80},{l:'T',v:95},{l:'W',v:70},{l:'T',v:58},{l:'F',v:76},{l:'S',v:45},{l:'S',v:40}], streak:5, hit:5, of:7, sip:36, sips:122 },
   month:{ h:'WHEN YOU DRINK', headline:'<b>22/30</b> days on goal · consistency up <b>14%</b> vs last month.', bars:[{l:'W1',v:65},{l:'W2',v:78},{l:'W3',v:90},{l:'W4',v:72}], streak:5, hit:22, of:30, sip:35, sips:540 },
   year:{ h:'WHEN YOU DRINK', headline:'<b>148 L</b> drunk · <b>148 L</b> donated. Strongest in summer.', bars:[{l:'Q1',v:55},{l:'Q2',v:80},{l:'Q3',v:92},{l:'Q4',v:60}], streak:5, hit:'78%', of:'', sip:35, sips:4200 }
 };
-function insHTML(range){ const d=INS[range]; const lbl={today:'Today',week:'Week',month:'Month',year:'Year'};
+// When real archived history exists (≥14 days, e.g. seeded demo data), drive Insights from it
+// instead of the static placeholder above. Falls back to INS for fresh/empty accounts.
+function computeINS(){
+  const days=DAYHIST.slice(0,30);                      // newest-first archived days
+  const goal=HS.goal||2500;
+  const pct=d=>Math.max(0,Math.min(140,Math.round(100*(d.intake||0)/(d.goal||goal))));
+  const hit=list=>list.filter(d=>d.goalHit).length;
+  const sipsOf=list=>list.reduce((s,d)=>s+(d.sips||0),0);
+  const last7=days.slice(0,7);
+  // today's bars from this morning's sip times
+  const tb=[{l:'6a',v:0,lo:5,hi:9},{l:'9a',v:0,lo:9,hi:12},{l:'12p',v:0,lo:12,hi:15},{l:'3p',v:0,lo:15,hi:18},{l:'6p',v:0,lo:18,hi:21},{l:'9p',v:0,lo:21,hi:24}];
+  let tmax=1; SIPLOG.forEach(e=>{ const h=new Date(e.t).getHours(); const b=tb.find(x=>h>=x.lo&&h<x.hi); if(b){ b.v+=(e.ml||0); tmax=Math.max(tmax,b.v); } });
+  const todayBars=tb.map(b=>({l:b.l, v:Math.round(100*b.v/tmax)}));
+  const cap=v=>Math.max(6,Math.min(100,v));            // keep bars inside their track
+  const wkBars=[...last7].reverse().map((d,i)=>({l:'MTWTFSS'[i]||'·', v:cap(pct(d))}));
+  const wkAvg=n=>{ const seg=days.slice(n*7,n*7+7); return seg.length?Math.round(seg.reduce((s,d)=>s+pct(d),0)/seg.length):0; };
+  const moBars=[{l:'W1',v:cap(wkAvg(3))},{l:'W2',v:cap(wkAvg(2))},{l:'W3',v:cap(wkAvg(1))},{l:'W4',v:cap(wkAvg(0))}];   // oldest→newest
+  const tpct=Math.round(100*(HS.intake||0)/goal);
+  return {
+    today:{ h:"TODAY'S RHYTHM", headline:`<b>${tpct}%</b> of today's goal so far · ${SIPLOG.length} sips logged.`, bars:todayBars, streak:HS.streak, hit:(HS.intake>=goal?'goal hit':'on track'), of:'', sip:HS.avgSip||35, sips:SIPLOG.length },
+    week:{ h:'WHEN YOU DRINK', headline:`<b>${hit(last7)}/7</b> days on goal this week · ${HS.streak}-day streak.`, bars:wkBars, streak:HS.streak, hit:hit(last7), of:7, sip:HS.avgSip||36, sips:sipsOf(last7) },
+    month:{ h:'WHEN YOU DRINK', headline:`<b>${hit(days)}/${days.length}</b> days on goal · streak <b>${HS.streak}</b> 🔥`, bars:moBars, streak:HS.streak, hit:hit(days), of:days.length, sip:HS.avgSip||35, sips:sipsOf(days) },
+    year:INS.year
+  };
+}
+function insData(range){ if(typeof DAYHIST!=='undefined' && DAYHIST.length>=14){ try{ return computeINS()[range]; }catch(e){} } return INS[range]; }
+function insHTML(range){ const d=insData(range); const lbl={today:'Today',week:'Week',month:'Month',year:'Year'};
   return `<div class="rangePills">${['today','week','month','year'].map(r=>`<button data-r="${r}" class="${r===range?'on':''}">${lbl[r]}</button>`).join('')}</div>
   <div class="ins">
     <div class="insLede">${d.headline}</div>
@@ -1674,7 +1704,7 @@ function insHTML(range){ const d=INS[range]; const lbl={today:'Today',week:'Week
 function mockSips(){ const rows=[['07:42',180,'first drink of the day — strong start'],['09:15',90,'steady sip · 3s'],['10:30',120,'steady sip · 4s'],['13:05',60,'small sip · 2s'],['15:40',140,'gulped 140 ml in 5s']];
   return rows.map(r=>`<div class="sipRow"><span class="t">${r[0]}</span><span class="x">${r[1]} ml</span></div><div class="sipNote">${r[2]}</div>`).join(''); }
 function selectBar(range,i,el){ panelBody.querySelectorAll('#bars .bar').forEach(b=>b.classList.remove('sel')); el.classList.add('sel');
-  const label=INS[range].bars[i].l; const drill=$('drill');
+  const label=insData(range).bars[i].l; const drill=$('drill');
   drill.innerHTML=`<div class="lbl">${label.toUpperCase()} · sip history · tap a sip</div>`+mockSips();
   drill.querySelectorAll('.sipNote').forEach(n=>n.style.display='none');
   drill.classList.add('open');
@@ -2844,6 +2874,41 @@ $('devEvo').addEventListener('input', e=>{ const g=+e.target.value/100; if(windo
 $('devFF').addEventListener('click', ()=>{ HS.intake=Math.min(HS.goal, HS.intake+400); HS.freed+=400; HS.donated+=400; if(HS.intake>=HS.goal) onPodGoal(); updateHome(); if(detailView==='freed') renderDetail(); toast('next day · +400 ml'); });
 $('devStreak').addEventListener('click', ()=>{ HS.streak++; updateHome(); celebrateStreak(); notify('<span class="nic">✦</span> <b>'+HS.streak+'-day streak!</b> Keep the current flowing', '#9a6cff'); });
 $('devDonate').addEventListener('click', ()=>{ HS.freed+=500; HS.donated+=500; ORQA_COMMUNITY.litres+=1; updateHome(); if(detailView==='freed') renderDetail(); toast('+0.5 L donated — milestone!'); });
+// ── Seed a realistic month of demo data (Insights + home + streak) for showing the app ──
+function seedDemoMonth(){
+  if(POD.mock && typeof exitDemoMode==='function') exitDemoMode();   // never let a demo-pod block persistence
+  const goal=2500; HS.goal=goal;
+  DAYHIST.length=0;
+  const now=new Date();
+  for(let k=1;k<=30;k++){ const d=new Date(now); d.setDate(now.getDate()-k);
+    const weekend=(d.getDay()===0||d.getDay()===6);
+    let intake=(weekend?2320:2680)+Math.round((Math.sin(k*1.7)+Math.cos(k*0.85))*190);
+    if(k>=13 && k%8===0) intake-=780;              // a couple of clear off-days earlier in the month
+    if(k<=12) intake=Math.max(intake,2540);        // a strong, believable recent streak
+    intake=Math.max(950,Math.min(3050,Math.round(intake)));
+    DAYHIST.push({ date:d.toDateString(), intake, wasted:Math.round(40+Math.random()*110),
+      goal, goalHit:intake>=goal, sips:10+Math.round(intake/165) });   // newest-first (k=1 = yesterday)
+  }
+  let st=0; for(const d of DAYHIST){ if(d.goalHit) st++; else break; }   // current streak = trailing goal-hits
+  HS.streak=st;
+  HS.intake=Math.round(goal*0.66); HS.freed=HS.intake; HS.donated=HS.intake; HS.wasted=90; HS._goalHit=false; HS._met=false;
+  SIPLOG.length=0;
+  [[7,42,190],[8,55,120],[10,12,150],[11,40,90],[12,30,140],[14,15,110],[15,50,160]].forEach(([h,m,ml])=>{
+    const t=new Date(now); t.setHours(h,m,0,0); if(t<=now) SIPLOG.push({ t, ml, dur:(2+Math.round(Math.random()*4))*1000, after:0, before:ml, action:'In hand', health:null }); });
+  SIPLOG.sort((a,b)=>b.t-a.t); lastSipAt=SIPLOG.length?SIPLOG[0].t:null;
+  saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('month');
+  toast('Seeded 1 month of demo data · '+HS.streak+'-day streak');
+  notify('<span class="nic">🗓</span> <b>Demo month loaded</b> · '+HS.streak+'-day streak, 30 days of Insights', '#46e0d2');
+}
+function clearDemoMonth(){ DAYHIST.length=0; SIPLOG.length=0; REFILLLOG.length=0; DISPOSELOG.length=0;
+  HS.intake=0; HS.freed=0; HS.donated=0; HS.wasted=0; HS.streak=0; HS._goalHit=false; HS._met=false; lastSipAt=null;
+  try{ ORQA.store.removeItem(ST_KEY); }catch(e){} saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('today');
+  toast('Demo data cleared'); }
+$('devSeed').addEventListener('click', seedDemoMonth);
+$('devClearSeed').addEventListener('click', clearDemoMonth);
+window.__seedDemoMonth=seedDemoMonth;   // also callable from the console for quick demos
 $('devTod').addEventListener('click', ()=>cycleTod());
 $('devBreach').addEventListener('click', ()=>{ toast('orca movement removed'); });
 $('devAI').addEventListener('click', ()=>{ toast('Dr. ORQA glow removed'); });
