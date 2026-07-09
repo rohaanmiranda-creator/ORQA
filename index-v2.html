@@ -2811,20 +2811,23 @@ $('devShow').onclick=()=>runBottleShow($('devShow'));
 // Real state lives in localStorage and survives reload/crash; every day is
 // archived and zeroed at calendar midnight; demo data only exists behind an
 // explicit opt-in with a visible badge and is NEVER persisted.
-const ST_KEY='orqaState_v1';
+let ST_KEY='orqaState_v1::anon';                     // scoped per signed-in account (re-keyed on login)
+function accountStKey(email){ return 'orqaState_v1::'+(email||'anon'); }
 const DAYHIST=[];                                    // last 30 archived days {date,intake,wasted,goal,goalHit,sips}
 let _stDate=new Date().toDateString();
 let _saveT=null;
+function _persistNow(){ try{
+  ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
+    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
+    lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
+    sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
+    refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
+    disposes:DISPOSELOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
+    hist:DAYHIST.slice(0,30) }));
+  }catch(e){ console.warn('[persist] save failed', e); } }
 function saveState(){ if(POD.mock) return;           // demo mutations must never overwrite the real day
-  clearTimeout(_saveT); _saveT=setTimeout(()=>{ try{
-    ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
-      hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit },
-      lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
-      sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
-      refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
-      disposes:DISPOSELOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
-      hist:DAYHIST.slice(0,30) }));
-  }catch(e){ console.warn('[persist] save failed', e); } }, 800); }
+  clearTimeout(_saveT); _saveT=setTimeout(_persistNow, 800); }
+function saveStateNow(){ if(POD.mock) return; clearTimeout(_saveT); _persistNow(); }   // immediate flush (seed/clear/critical)
 function archiveDay(dateStr, hs, sipCount){ DAYHIST.unshift({ date:dateStr, intake:Math.round(hs.intake||0),
   wasted:Math.round(hs.wasted||0), goal:hs.goal||HS.goal, goalHit:(hs.intake||0)>=(hs.goal||HS.goal), sips:sipCount||0 });
   while(DAYHIST.length>30) DAYHIST.pop(); }
@@ -2914,6 +2917,16 @@ function seedDemoHistory(){
 window.__podSim={ podLive, podSip, podEvt, podDrink, podRefill, podDispose,
   offerDemoMode, exitDemoMode, startMockPod, checkDayRollover, dayResetLocal,
   loadPersisted, saveState, HS, POD, SIPLOG, REFILLLOG, DISPOSELOG, DAYHIST };
+// Re-key persisted state to a specific account and reload that account's data. Called on login
+// so each account keeps its own hydration history on the device. First login for a real account
+// adopts any legacy global-key data so nothing is lost on upgrade.
+window.__loadAccount=function(email){
+  const key=accountStKey(email);
+  try{ if(email && email!=='anon' && email!=='guest' && !ORQA.store.getItem(key)){
+    const legacy=ORQA.store.getItem('orqaState_v1'); if(legacy){ ORQA.store.setItem(key, legacy); } } }catch(e){}
+  ST_KEY=key;
+  try{ loadPersisted(true); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats(); if(typeof refreshBottleChip==='function') refreshBottleChip(); }catch(e){ console.warn('[account load]', e); }
+};
 loadPersisted(true);                                  // restore the real day (archives yesterday if the app slept past midnight)
 commitWater(); classifyAction(); updateHome(); refreshHomeStats();
 setInterval(()=>{ if(!document.hidden) refreshHomeStats(); }, 30000);    // keep "Xm ago" fresh
@@ -2973,14 +2986,14 @@ function seedDemoMonth(){
   [[7,42,190],[8,55,120],[10,12,150],[11,40,90],[12,30,140],[14,15,110],[15,50,160]].forEach(([h,m,ml])=>{
     const t=new Date(now); t.setHours(h,m,0,0); if(t<=now) SIPLOG.push({ t, ml, dur:(2+Math.round(Math.random()*4))*1000, after:0, before:ml, action:'In hand', health:null }); });
   SIPLOG.sort((a,b)=>b.t-a.t); lastSipAt=SIPLOG.length?SIPLOG[0].t:null;
-  saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  saveStateNow(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
   if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('month');
   toast('Seeded 1 month of demo data · '+HS.streak+'-day streak');
   notify('<span class="nic">🗓</span> <b>Demo month loaded</b> · '+HS.streak+'-day streak, 30 days of Insights', '#46e0d2');
 }
 function clearDemoMonth(){ DAYHIST.length=0; SIPLOG.length=0; REFILLLOG.length=0; DISPOSELOG.length=0;
   HS.intake=0; HS.freed=0; HS.donated=0; HS.wasted=0; HS.streak=0; HS._goalHit=false; HS._met=false; lastSipAt=null;
-  try{ ORQA.store.removeItem(ST_KEY); }catch(e){} saveState(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
+  try{ ORQA.store.removeItem(ST_KEY); }catch(e){} saveStateNow(); updateHome(); if(typeof refreshHomeStats==='function') refreshHomeStats();
   if(typeof activeTab!=='undefined' && activeTab==='insights' && document.body.classList.contains('panel-open')) renderInsights('today');
   toast('Demo data cleared'); }
 $('devSeed').addEventListener('click', seedDemoMonth);
@@ -3736,7 +3749,9 @@ ORQA.auth = (function(){
   let sb=null, gateEl=null, pending={}, pushT=null;
   const LS='orqaAuth';
 
-  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role); }
+  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role);
+    try{ if(window.__loadAccount) window.__loadAccount(u&&u.email); }catch(e){}   // load THIS account's persisted data
+  }
 
   function buildGate(){
     if(gateEl) return gateEl;
