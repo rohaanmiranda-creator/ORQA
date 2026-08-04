@@ -1901,54 +1901,6 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" id="dpDisconnect">Disconnect</button>
       <button class="chip" id="dpStream">Raw stream ▸</button>
     </div>
-    <div class="bsub" style="margin-top:12px">Hardware command console · writes ASCII to char <b>0x2A59</b></div>
-    <div class="dpCmdGrp"><span class="dpGrpL">LED</span>
-      <button class="chip" data-devcmd="GLOW:0x46e0d2:1500">Teal</button>
-      <button class="chip" data-devcmd="GLOW:0xffffff:1500">White</button>
-      <button class="chip" data-devcmd="GLOW:0xf43f5e:1500">Red</button>
-      <button class="chip" data-devcmd="GLOW:0x22c55e:1500">Green</button>
-      <button class="chip" data-devcmd="LIGHT:rainbow:cycle:4000">Rainbow</button>
-      <button class="chip" data-devcmd="GLOW:AUTO">Auto</button>
-      <button class="chip" data-devcmd="GLOW:OFF">Off</button>
-    </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
-      <button class="chip" data-devcmd="VIBE:60:150:0">Tick</button>
-      <button class="chip" data-devcmd="VIBE:60:150:1">Double</button>
-      <button class="chip" data-devcmd="VIBE:60:120:2">Triple</button>
-      <button class="chip" data-devcmd="VIBE:70:400:3">Long</button>
-      <button class="chip" data-devcmd="VIBE:80:150:4">Heartbeat</button>
-      <button class="chip" data-devcmd="VIBE:80:140:5">Ramp</button>
-      <button class="chip" data-devcmd="VIBE:100:100:6">Knock</button>
-      <button class="chip" data-devcmd="VIBE:70:100:7">Train</button>
-      <button class="chip" data-devcmd="VIBE:90:200:8">Escalate</button>
-      <button class="chip" data-devcmd="VIBE:40:600:9">Purr</button>
-    </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Hap str.</span>
-      <button class="chip" data-devcmd="HAPCFG:50">50%</button>
-      <button class="chip" data-devcmd="HAPCFG:100">100%</button>
-      <button class="chip" data-devcmd="HAPCFG:150">150%</button>
-      <button class="chip" data-devcmd="HAPCFG:200">200%</button>
-    </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Pod</span>
-      <button class="chip" data-devcmd="BOTTLE:OUT">Pod out · pause</button>
-      <button class="chip" data-devcmd="BOTTLE:IN">Pod in · resume</button>
-      <button class="chip" data-devcmd="POWERSAVE:AUTO">PS auto</button>
-      <button class="chip" data-devcmd="POWERSAVE:ON">PS on</button>
-      <button class="chip" data-devcmd="POWERSAVE:OFF">PS off</button>
-      <button class="chip" data-devcmd="LIGHTPS:ON">Light saver on</button>
-      <button class="chip" data-devcmd="LIGHTPS:OFF">Light saver off</button>
-    </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Ops</span>
-      <button class="chip" data-devcmd="TARE">Tare</button>
-      <button class="chip" data-devcmd="SETGOAL:2500">Set goal</button>
-      <button class="chip" data-devcmd="SHOW">8s show</button>
-      <button class="chip" data-devcmd="RESETDAY">Reset day</button>
-    </div>
-    <div class="dpRaw">
-      <input id="dpCmdInput" placeholder="raw command · e.g. GLOW:0xff8800:2000" autocomplete="off" spellcheck="false">
-      <button class="chip" id="dpCmdSend">Send ▸</button>
-    </div>
-    <div class="dpLog" id="dpCmdLog"><div class="dpLogEmpty">command log · sent commands + pod ACK appear here</div></div>
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
