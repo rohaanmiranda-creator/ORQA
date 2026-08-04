@@ -1906,13 +1906,6 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" data-devcmd="GLOW:AUTO">Auto</button>
       <button class="chip" data-devcmd="GLOW:OFF">Off</button>
     </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">LED fmt</span>
-      <button class="chip" data-ledfmt="0x">0x…</button>
-      <button class="chip" data-ledfmt="bare">RRGGBB</button>
-      <button class="chip" data-ledfmt="hash">#RRGGBB</button>
-      <button class="chip" data-ledfmt="rgb">R,G,B</button>
-      <span class="dpFmtHint" id="dpFmtHint">tap each · the one that flashes the LED red is your firmware's format</span>
-    </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
       <button class="chip" data-devcmd="VIBE:60:150:0">Tick</button>
       <button class="chip" data-devcmd="VIBE:60:150:1">Double</button>
@@ -1920,6 +1913,10 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" data-devcmd="VIBE:70:400:3">Long</button>
       <button class="chip" data-devcmd="VIBE:80:150:4">Heartbeat</button>
       <button class="chip" data-devcmd="VIBE:80:140:5">Ramp</button>
+      <button class="chip" data-devcmd="VIBE:100:100:6">Knock</button>
+      <button class="chip" data-devcmd="VIBE:70:100:7">Train</button>
+      <button class="chip" data-devcmd="VIBE:90:200:8">Escalate</button>
+      <button class="chip" data-devcmd="VIBE:40:600:9">Purr</button>
     </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Hap str.</span>
       <button class="chip" data-devcmd="HAPCFG:50">50%</button>
@@ -1933,11 +1930,6 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" data-devcmd="POWERSAVE:AUTO">PS auto</button>
       <button class="chip" data-devcmd="POWERSAVE:ON">PS on</button>
       <button class="chip" data-devcmd="POWERSAVE:OFF">PS off</button>
-    </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Buzzer</span>
-      <button class="chip" data-devcmd="BUZZ:2000:150">Buzz</button>
-      <button class="chip" data-devcmd="BUZZ:1">Buzz on</button>
-      <button class="chip" data-devcmd="SOUND:0">Sound off</button>
     </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Ops</span>
       <button class="chip" data-devcmd="TARE">Tare</button>
@@ -1953,18 +1945,6 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
-    <div class="bsub">Light · colour &amp; mode</div>
-    <div class="lightRow">
-      <input type="color" id="bLightColor" value="#46e0d2" aria-label="custom colour">
-      <div class="swatches" id="bglow"><span style="background:#46e0d2" data-c="46e0d2"></span><span style="background:#3b82f6" data-c="3b82f6"></span><span style="background:#22c55e" data-c="22c55e"></span><span style="background:#f43f5e" data-c="f43f5e"></span><span style="background:#ffd166" data-c="ffd166"></span><span style="background:#ffffff" data-c="ffffff"></span></div>
-    </div>
-    <div class="chips lightModes" id="bLightMode">
-      <span class="chip on" data-m="solid">Solid</span><span class="chip" data-m="breathe">Breathe</span><span class="chip" data-m="pulse">Pulse</span><span class="chip" data-m="rainbow">Rainbow</span><span class="chip" data-m="gradient">Gradient</span><span class="chip" data-m="ring">Ring wave</span>
-    </div>
-    <div class="chips gradSchemes" id="bGradScheme" style="display:none">
-      <span class="chip on" data-g="aurora">Aurora</span><span class="chip" data-g="sunset">Sunset</span><span class="chip" data-g="ocean">Ocean</span><span class="chip" data-g="forest">Forest</span>
-    </div>
-    <div class="lightBtns"><button class="chip" id="bLightApply">✦ Apply to bottle</button><button class="chip" id="bLightOff">Off</button></div>
     <div class="bsub">Reminder style</div>
     <div class="chips" id="bstyle"><span class="chip on" data-s="Gentle">Gentle</span><span class="chip" data-s="Standard">Standard</span><span class="chip" data-s="Urgent">Urgent</span><span class="chip" data-s="Custom">Custom…</span></div>
     <div class="bsub">Feedback channels — turn any off (silences both pod + phone)</div>
