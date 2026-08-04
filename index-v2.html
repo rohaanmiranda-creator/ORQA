@@ -2594,19 +2594,26 @@ function podAutoReconnect(dev){
   };
   _rcTimer=setTimeout(attempt, 1200);     // small grace: pod may just be rebooting
 }
+// Full 128-bit UUID STRINGS, not 0x… numbers: Bluefy (iOS) rejects numeric UUIDs
+// with "request payload could not be parsed"; strings work on every platform.
+const BLE_SVC ='0000180d-0000-1000-8000-00805f9b34fb';
+const BLE_LIVE='00002a57-0000-1000-8000-00805f9b34fb';
+const BLE_SIP ='00002a58-0000-1000-8000-00805f9b34fb';
+const BLE_CMD ='00002a59-0000-1000-8000-00805f9b34fb';
+const BLE_EVT ='00002a5a-0000-1000-8000-00805f9b34fb';
 // shared connection setup — used by the first connect AND the post-restart reconnect.
 // Wires all four characteristics + notifications on an already gatt-connected device.
 async function setupPodConnection(dev){
   const gatt=(dev.gatt&&dev.gatt.connected)?dev.gatt:await dev.gatt.connect();
-  const s=await gatt.getPrimaryService(0x180D);
+  const s=await gatt.getPrimaryService(BLE_SVC);
   // one handler per characteristic, replaced (not stacked) on every reconnect —
   // stacked listeners after a drop/reconnect cycle double-count every sip
   const hook=(ch,fn)=>{ if(ch._orqaH) ch.removeEventListener('characteristicvaluechanged', ch._orqaH);
     ch._orqaH=e=>fn(new TextDecoder().decode(e.target.value)); ch.addEventListener('characteristicvaluechanged', ch._orqaH); };
-  const live=await s.getCharacteristic(0x2A57); await live.startNotifications(); hook(live, podLive);
-  const sip=await s.getCharacteristic(0x2A58); await sip.startNotifications(); hook(sip, podSip);
-  try{ const evt=await s.getCharacteristic(0x2A5A); await evt.startNotifications(); hook(evt, podEvt); }catch(e){}   // v8 event stream (refill/dispose/goal/…)
-  try{ POD.cmdChar=await s.getCharacteristic(0x2A59); }catch(e){ POD.cmdChar=null; }
+  const live=await s.getCharacteristic(BLE_LIVE); await live.startNotifications(); hook(live, podLive);
+  const sip=await s.getCharacteristic(BLE_SIP); await sip.startNotifications(); hook(sip, podSip);
+  try{ const evt=await s.getCharacteristic(BLE_EVT); await evt.startNotifications(); hook(evt, podEvt); }catch(e){}   // v8 event stream (refill/dispose/goal/…)
+  try{ POD.cmdChar=await s.getCharacteristic(BLE_CMD); }catch(e){ POD.cmdChar=null; }
   POD.device=dev;
   if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>{ podCleanup(); podAutoReconnect(dev); }); }   // drop handler + self-healing reconnect
   if(POD.mock) exitDemoMode();   // a real pod arriving mid-demo: purge demo data BEFORE anchoring totals to it
@@ -2622,7 +2629,7 @@ async function connectPod(){
   if(!navigator.bluetooth){ POD._connecting=false; return offerDemoMode(); }   // never silently fake data — demo is an explicit, badged opt-in
   try{
     toast('Scanning for HydrationPod…');
-    const dev=await navigator.bluetooth.requestDevice({ filters:[{name:'HydrationPod'},{services:[0x180D]}], optionalServices:[0x180D] });
+    const dev=await navigator.bluetooth.requestDevice({ filters:[{namePrefix:'ORQA'},{name:'HydrationPod'},{services:[BLE_SVC]}], optionalServices:[BLE_SVC] });
     await dev.gatt.connect();
     await setupPodConnection(dev);
     if(c) c.style.background='#46e0d2';
