@@ -1,7 +1,7 @@
 {
   "name": "ORQA",
   "short_name": "ORQA",
-  "start_url": "/ORQA/index.html",
+  "start_url": "/ORQA/index-v2.html",
   "scope": "/ORQA/",
   "display": "standalone",
   "orientation": "portrait",
