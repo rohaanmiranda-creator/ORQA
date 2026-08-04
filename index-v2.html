@@ -1914,10 +1914,25 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <span class="dpFmtHint" id="dpFmtHint">tap each · the one that flashes the LED red is your firmware's format</span>
     </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
-      <button class="chip" data-devcmd="VIBE:120:120">Vibe·short</button>
-      <button class="chip" data-devcmd="VIBE:220:400">Vibe·long</button>
-      <button class="chip" data-devcmd="HAPTIC:1">Haptic on</button>
-      <button class="chip" data-devcmd="HAPTIC:0">Haptic off</button>
+      <button class="chip" data-devcmd="VIBE:60:150:0">Tick</button>
+      <button class="chip" data-devcmd="VIBE:60:150:1">Double</button>
+      <button class="chip" data-devcmd="VIBE:60:120:2">Triple</button>
+      <button class="chip" data-devcmd="VIBE:70:400:3">Long</button>
+      <button class="chip" data-devcmd="VIBE:80:150:4">Heartbeat</button>
+      <button class="chip" data-devcmd="VIBE:80:140:5">Ramp</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Hap str.</span>
+      <button class="chip" data-devcmd="HAPCFG:50">50%</button>
+      <button class="chip" data-devcmd="HAPCFG:100">100%</button>
+      <button class="chip" data-devcmd="HAPCFG:150">150%</button>
+      <button class="chip" data-devcmd="HAPCFG:200">200%</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Pod</span>
+      <button class="chip" data-devcmd="BOTTLE:OUT">Pod out · pause</button>
+      <button class="chip" data-devcmd="BOTTLE:IN">Pod in · resume</button>
+      <button class="chip" data-devcmd="POWERSAVE:AUTO">PS auto</button>
+      <button class="chip" data-devcmd="POWERSAVE:ON">PS on</button>
+      <button class="chip" data-devcmd="POWERSAVE:OFF">PS off</button>
     </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Buzzer</span>
       <button class="chip" data-devcmd="BUZZ:2000:150">Buzz</button>
@@ -2506,11 +2521,33 @@ function podCleanup(){
 // the demo/mock pod has no device, so tear it down directly.
 function disconnectPod(){
   if(!POD.connected){ toast('No pod connected'); return; }
+  POD._userDx=true;                       // deliberate: the auto-reconnector must stand down
+  clearTimeout(_rcTimer);
   const d=POD.device;
   if(d && d.gatt && d.gatt.connected){ try{ d.gatt.disconnect(); }catch(e){ podCleanup(); } }
   else { podCleanup(); }
 }
 window.__disconnectPod=disconnectPod;
+// v9: the link heals itself. On an unexpected drop, retry with backoff (~2 min worth)
+// using the SAME device object — no chooser dialog, no user gesture needed.
+let _rcTimer=null, _rcTries=0;
+function podAutoReconnect(dev){
+  if(POD._userDx) return;
+  clearTimeout(_rcTimer); _rcTries=0;
+  const attempt=async()=>{
+    if(POD.connected || POD._userDx) return;
+    _rcTries++;
+    try{
+      await dev.gatt.connect();
+      await setupPodConnection(dev);
+      notify('● Pod reconnected', '#46e0d2');
+      return;
+    }catch(e){ console.warn('[pod] reconnect attempt '+_rcTries+' failed', e); }
+    if(_rcTries<12){ _rcTimer=setTimeout(attempt, Math.min(1500*_rcTries, 15000)); if(_rcTries===1) toast('Pod link lost — reconnecting…'); }
+    else toast('Pod not found — tap Add my ORQA to reconnect');
+  };
+  _rcTimer=setTimeout(attempt, 1200);     // small grace: pod may just be rebooting
+}
 // shared connection setup — used by the first connect AND the post-restart reconnect.
 // Wires all four characteristics + notifications on an already gatt-connected device.
 async function setupPodConnection(dev){
@@ -2525,11 +2562,12 @@ async function setupPodConnection(dev){
   try{ const evt=await s.getCharacteristic(0x2A5A); await evt.startNotifications(); hook(evt, podEvt); }catch(e){}   // v8 event stream (refill/dispose/goal/…)
   try{ POD.cmdChar=await s.getCharacteristic(0x2A59); }catch(e){ POD.cmdChar=null; }
   POD.device=dev;
-  if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>podCleanup()); }   // attach the drop handler once per device
+  if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>{ podCleanup(); podAutoReconnect(dev); }); }   // drop handler + self-healing reconnect
   if(POD.mock) exitDemoMode();   // a real pod arriving mid-demo: purge demo data BEFORE anchoring totals to it
-  POD.connected=true; POD.mock=false; setDemoBadge(false); POD._sync=null;   // fresh counter-sync anchor on every (re)connect
+  POD.connected=true; POD.mock=false; POD._userDx=false; setDemoBadge(false); POD._sync=null;   // fresh counter-sync anchor on every (re)connect
   clearInterval(POD._mt); POD._mt=null; clearInterval(POD._motT); POD._motT=null;   // stop any demo pod/motion now that a real one is live
   if(POD.cmdChar) podCommand('SETGOAL:'+Math.round(HS.goal));    // push the app's goal onto the pod so PCT/GOAL match
+  if(POD.cmdChar) podCommand('SETTIME:'+Math.floor((Date.now()-new Date().getTimezoneOffset()*60000)/1000));   // local-time epoch → pod real clock + midnight auto day-reset
 }
 async function connectPod(){
   if(POD._connecting)return; POD._connecting=true;
