@@ -1607,7 +1607,9 @@ requestAnimationFrame(stepSkyLife);
 const HS = { goal:2500, intake:0, freed:0, donated:0, wasted:0, avgSip:35, unit:'ml', capacity:600, battery:62, streak:0, _goalHit:false };
 // Reminders live ON THE POD (REMCFG command) so they fire with no phone around;
 // this is the app-side mirror of that config, persisted and re-pushed on connect.
-const REM = { on:false, mins:60, from:'08:00', to:'22:00', smart:true, light:'ffb45a', style:'Standard' };
+const REM = { on:false, mins:60, from:'08:00', to:'22:00', smart:true, light:'ffb45a', style:'Standard', lightKind:'solid', lightAnim:'breathe' };
+// The pod's ALWAYS-ON light (LEDMODE/BRIGHT/LIGHTPS) — mirrored + re-pushed the same way.
+const LED = { mode:'breathe', cols:['46e0d2'], bright:55, saver:false };
 // ORQA community impact (the shared "Fill the Well" charity total, in litres) — grows with you
 const ORQA_COMMUNITY = { litres:128450, people:5138 };
 const ARC = 2*Math.PI*40;
@@ -1950,6 +1952,24 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
+    <div class="bsub">Always-on light</div>
+    <div class="chips" id="ledModeRow">
+      <span class="chip" data-m="off">Off</span><span class="chip" data-m="solid">Solid</span>
+      <span class="chip" data-m="gradient">Gradient</span><span class="chip" data-m="rainbow">Rainbow</span>
+      <span class="chip" data-m="spin">Spin</span><span class="chip" data-m="pulse">Pulse</span>
+      <span class="chip" data-m="breathe">Breathe</span>
+    </div>
+    <div class="lightRow" style="align-items:center;gap:8px">
+      <input type="color" id="ledPick" value="#46e0d2">
+      <span class="chip" id="ledAddCol">+ add colour</span>
+      <div class="swatches" id="ledColList"></div>
+    </div>
+    <div class="lightRow" style="align-items:center;gap:8px">
+      <span class="bsub" style="margin:0">Brightness</span>
+      <input type="range" id="ledBright" min="5" max="100" step="5" value="55" style="flex:1">
+      <span class="chip" id="ledSaverChip">Power saver</span>
+    </div>
+    <div class="bsub" style="opacity:.75">Power saver on: light only while the app is connected · off: glows until the battery hits 5%</div>
     <div class="bsub">Reminders — stored on the pod · works even without the phone</div>
     <div class="chips" id="remEvery">
       <span class="chip" data-mi="30">30 min</span><span class="chip" data-mi="45">45 min</span>
@@ -1964,11 +1984,14 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <span class="chip" id="remSmartChip">Smart · a sip skips that round</span>
       <span class="chip" id="remTest">Preview nudge</span>
     </div>
-    <div class="bsub">Reminder light — separate from the bottle's own light</div>
-    <div class="chips" id="remLightRow">
-      <span class="chip" data-c="ffb45a">Amber</span><span class="chip" data-c="46e0d2">Teal</span>
-      <span class="chip" data-c="f43f5e">Red</span><span class="chip" data-c="9a6cff">Purple</span>
-      <span class="chip" data-c="off">No light</span>
+    <div class="bsub">Reminder light — separate from the always-on light</div>
+    <div class="chips" id="remKindRow">
+      <span class="chip" data-k="solid">Solid</span><span class="chip" data-k="rainbow">Rainbow</span><span class="chip" data-k="off">No light</span>
+    </div>
+    <div class="lightRow" id="remSolidRow" style="align-items:center;gap:8px">
+      <input type="color" id="remPick" value="#ffb45a">
+      <span class="chip" data-a="breathe">Breathe</span>
+      <span class="chip" data-a="strobe">Strobe</span>
     </div>
     <div class="bsub">Reminder style</div>
     <div class="chips" id="bstyle"><span class="chip" data-s="Gentle">Gentle</span><span class="chip" data-s="Standard">Standard</span><span class="chip" data-s="Urgent">Urgent</span></div>
@@ -2106,15 +2129,43 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
       const pt=REM.style==='Gentle'?9:REM.style==='Urgent'?8:1, amp=REM.style==='Gentle'?40:REM.style==='Urgent'?90:70;
       if(REM.light!=='off') podCommand('LIGHT:'+REM.light+'-201004:cycle:5000');
       podCommand('VIBE:'+amp+':160:'+pt); toast('Previewing the nudge…'); };
-    mark('#remLightRow .chip','c', REM.light);
-    panelBody.querySelectorAll('#remLightRow .chip').forEach(c=>c.onclick=()=>{ REM.light=c.dataset.c; mark('#remLightRow .chip','c',REM.light);
-      toast('Reminder light · '+c.textContent); syncRem(); });
+    /* reminder light: solid (colour + breathe/strobe) or rainbow */
+    const remSolid=$('remSolidRow'), remPick=$('remPick');
+    const showSolid=()=>{ if(remSolid) remSolid.style.display=(REM.lightKind==='solid')?'flex':'none'; };
+    mark('#remKindRow .chip','k', REM.lightKind); showSolid();
+    panelBody.querySelectorAll('#remKindRow .chip').forEach(c=>c.onclick=()=>{ REM.lightKind=c.dataset.k; mark('#remKindRow .chip','k',REM.lightKind);
+      showSolid(); toast('Reminder light · '+c.textContent); syncRem(); });
+    if(remPick){ remPick.value='#'+(REM.light==='off'?'ffb45a':REM.light);
+      remPick.oninput=()=>{ REM.light=remPick.value.replace('#','').toLowerCase(); }; remPick.onchange=()=>syncRem(); }
+    mark('#remSolidRow .chip','a', REM.lightAnim);
+    panelBody.querySelectorAll('#remSolidRow .chip').forEach(c=>c.onclick=()=>{ REM.lightAnim=c.dataset.a; mark('#remSolidRow .chip','a',REM.lightAnim);
+      toast('Reminder · '+c.dataset.a); syncRem(); });
+  }
+  { // Always-on light — mode, colours (multi for gradient/spin/pulse/breathe), brightness, power saver
+    const syncLed=()=>{ saveState(); pushLedCfg(); };
+    const markM=v=>panelBody.querySelectorAll('#ledModeRow .chip').forEach(x=>x.classList.toggle('on', x.dataset.m===v));
+    const drawCols=()=>{ const el=$('ledColList'); if(!el) return;
+      el.innerHTML=LED.cols.map((c,i)=>'<span style="background:#'+c+'" data-i="'+i+'" title="tap to remove"></span>').join('');
+      el.querySelectorAll('span').forEach(s=>s.onclick=()=>{ if(LED.cols.length>1){ LED.cols.splice(+s.dataset.i,1); drawCols(); syncLed(); } }); };
+    markM(LED.mode); drawCols();
+    panelBody.querySelectorAll('#ledModeRow .chip').forEach(c=>c.onclick=()=>{ LED.mode=c.dataset.m; markM(LED.mode);
+      toast('Always-on light · '+c.textContent); syncLed(); });
+    const lp=$('ledPick');
+    const ac=$('ledAddCol'); if(ac) ac.onclick=()=>{ const c=(lp?lp.value:'#46e0d2').replace('#','').toLowerCase();
+      if(LED.cols.length>=6){ toast('Max 6 colours'); return; }
+      LED.cols.push(c); drawCols(); toast('Colour added'); syncLed(); };
+    if(lp) lp.onchange=()=>{ LED.cols[0]=lp.value.replace('#','').toLowerCase(); drawCols(); syncLed(); };
+    const br=$('ledBright'); if(br){ br.value=LED.bright; br.onchange=()=>{ LED.bright=+br.value; toast('Brightness '+LED.bright+'%'); syncLed(); }; }
+    const sv=$('ledSaverChip'); if(sv){ sv.classList.toggle('on', LED.saver);
+      sv.onclick=()=>{ LED.saver=!LED.saver; sv.classList.toggle('on', LED.saver);
+        toast(LED.saver?'Light only while the app is connected':'Light glows until battery hits 5%'); syncLed(); }; }
     panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.toggle('on', x.dataset.s===REM.style));
     panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
-      REM.style=c.dataset.s; toast('Reminder style · '+c.dataset.s); syncRem(); });
+      REM.style=c.dataset.s; toast('Reminder style · '+c.dataset.s); saveState(); pushRemCfg(); });
   }
   panelBody.querySelectorAll('.btog').forEach(t=>t.onclick=()=>{ const i=t.querySelector('i'); i.classList.toggle('on'); const on=i.classList.contains('on'); if(t.dataset.t==='haptic'){ if(on){ fxPodVibe(60,200); fxVibratePhone(60); } } else { if(on && FX.sound) podCommand('BUZZ:1'); } toast((t.dataset.t==='haptic'?'Haptic ':'Buzzer ')+(on?'on':'off')); });
-  $('ringbtl').onclick=()=>{ fxPodVibe(120,600,'PULSE'); if(typeof glowFlash==='function') glowFlash(0x46e0d2); fxVibratePhone([0,120,60,120]); toast('Ringing your bottle…'); };
+  $('ringbtl').onclick=()=>{ podCommand('RING');   /* pod: red/white flashing + 3 s vibration; ends on pickup */
+    fxVibratePhone([0,120,60,120]); toast('Ringing your bottle — red/white flash, stops when you pick it up'); };
   $('addbtl').onclick=()=>toast('Scan a new ORQA bottle to register it');
   { const bdc=$('bdisc'); if(bdc) bdc.onclick=()=>disconnectPod(); }
   const doTare=()=>{ if(!POD.connected){ toast('Connect the pod first'); return; } tareBottle(); };   // app-side zero (also sends firmware TARE)
@@ -2277,9 +2328,19 @@ window.__podCmd=podCommand;
 function pushRemCfg(){ if(!POD.cmdChar) return;
   const mm=t=>{ const [h,m]=String(t||'0:0').split(':').map(Number); return ((h||0)*60+(m||0))%1440; };
   const si=REM.style==='Gentle'?0:REM.style==='Urgent'?2:1;
-  podCommand('REMCFG:'+(REM.on?REM.mins:0)+':'+mm(REM.from)+':'+mm(REM.to)+':'+(REM.smart?1:0)+':'+(REM.light==='off'?'OFF':REM.light)+':'+si);
+  podCommand('REMCFG:'+(REM.on?REM.mins:0)+':'+mm(REM.from)+':'+mm(REM.to)+':'+(REM.smart?1:0)+':'+(REM.lightKind==='off'?'OFF':REM.light)+':'+si);
+  podCommand(REM.lightKind==='off' ? 'REMLIGHT:OFF'
+           : REM.lightKind==='rainbow' ? 'REMLIGHT:RAINBOW'
+           : 'REMLIGHT:SOLID:'+REM.light+':'+(REM.lightAnim==='strobe'?'STROBE':'BREATHE'));
 }
 window.__pushRemCfg=pushRemCfg;
+// the always-on light: mode + colours + brightness + power-saver, pushed together
+function pushLedCfg(){ if(!POD.cmdChar) return;
+  podCommand('LEDMODE:'+LED.mode.toUpperCase()+':'+(LED.cols.join('-')||'46e0d2'));
+  podCommand('BRIGHT:'+Math.max(5,Math.min(100,LED.bright|0)));
+  podCommand('LIGHTPS:'+(LED.saver?'ON':'OFF'));
+}
+window.__pushLedCfg=pushLedCfg;
 // ACK round-trip: resolves on EVT|ACK:<CMD> / EVT|NAK:<CMD>. Current v11/v12 firmware
 // never ACKs (v12 only NAKs unknown commands), so this resolves {acked:false, sent:true}
 // after the timeout instead of erroring — v13 adds EVT|ACK and makes this a real
@@ -2622,6 +2683,7 @@ async function setupPodConnection(dev){
   if(POD.cmdChar) podCommand('SETGOAL:'+Math.round(HS.goal));    // push the app's goal onto the pod so PCT/GOAL match
   if(POD.cmdChar) podCommand('SETTIME:'+Math.floor((Date.now()-new Date().getTimezoneOffset()*60000)/1000));   // local-time epoch → pod real clock + midnight auto day-reset
   if(POD.cmdChar) pushRemCfg();                                  // pod carries the reminder schedule autonomously
+  if(POD.cmdChar) pushLedCfg();                                  // …and the always-on light config
 }
 async function connectPod(){
   if(POD._connecting)return; POD._connecting=true;
@@ -3141,6 +3203,7 @@ function _persistNow(){ try{
   ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
     hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit, capacity:HS.capacity },
     rem:{ ...REM },
+    led:{ ...LED, cols:LED.cols.slice() },
     tareG:(POD.tareG==null?null:POD.tareG), calFullG:(POD.calFullG==null?null:POD.calFullG),
     lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
     sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
@@ -3161,6 +3224,7 @@ function loadPersisted(reset){ try{
   if(!DAYHIST.length) (s.hist||[]).forEach(h=>DAYHIST.push(h));
   const h=s.hs||{}; HS.goal=h.goal||HS.goal; if(h.capacity) HS.capacity=h.capacity;
   if(s.rem) Object.assign(REM, s.rem);               // reminder config survives reloads (and day changes)
+  if(s.led){ Object.assign(LED, s.led); if(!Array.isArray(LED.cols)||!LED.cols.length) LED.cols=['46e0d2']; }
   if(s.tareG!==undefined && s.tareG!==null) POD.tareG=s.tareG;   // keep the calibration across reloads
   if(s.calFullG!==undefined && s.calFullG!==null) POD.calFullG=s.calFullG;
   if(s.date!==_stDate){                              // app last ran on a previous day → archive it, start today fresh
