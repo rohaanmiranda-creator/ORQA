@@ -2584,7 +2584,11 @@ function podAutoReconnect(dev){
       await setupPodConnection(dev);
       notify('● Pod reconnected', '#46e0d2');
       return;
-    }catch(e){ console.warn('[pod] reconnect attempt '+_rcTries+' failed', e); }
+    }catch(e){ console.warn('[pod] reconnect attempt '+_rcTries+' failed', e);
+      // CRITICAL: a failed setup can leave the GATT link half-open — the pod then
+      // stops advertising and NOTHING can find it ("bluetooth disappeared").
+      try{ if(dev.gatt && dev.gatt.connected) dev.gatt.disconnect(); }catch(_){}
+    }
     if(_rcTries<12){ _rcTimer=setTimeout(attempt, Math.min(1500*_rcTries, 15000)); if(_rcTries===1) toast('Pod link lost — reconnecting…'); }
     else toast('Pod not found — tap Add my ORQA to reconnect');
   };
