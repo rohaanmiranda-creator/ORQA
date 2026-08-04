@@ -1,0 +1,18 @@
+{
+  "name": "ORQA",
+  "short_name": "ORQA",
+  "start_url": "/ORQA/index.html",
+  "scope": "/ORQA/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B1F2A",
+  "theme_color": "#0B1F2A",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

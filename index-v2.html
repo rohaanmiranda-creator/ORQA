@@ -1605,6 +1605,9 @@ requestAnimationFrame(stepSkyLife);
 // Daily fields start at ZERO — real state restores from localStorage (see the
 // persistence module); demo values only ever appear via explicit Demo mode.
 const HS = { goal:2500, intake:0, freed:0, donated:0, wasted:0, avgSip:35, unit:'ml', capacity:600, battery:62, streak:0, _goalHit:false };
+// Reminders live ON THE POD (REMCFG command) so they fire with no phone around;
+// this is the app-side mirror of that config, persisted and re-pushed on connect.
+const REM = { on:false, mins:60, from:'08:00', to:'22:00', smart:true, light:'ffb45a', style:'Standard' };
 // ORQA community impact (the shared "Fill the Well" charity total, in litres) — grows with you
 const ORQA_COMMUNITY = { litres:128450, people:5138 };
 const ARC = 2*Math.PI*40;
@@ -1906,23 +1909,32 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <button class="chip" data-devcmd="GLOW:AUTO">Auto</button>
       <button class="chip" data-devcmd="GLOW:OFF">Off</button>
     </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">LED fmt</span>
-      <button class="chip" data-ledfmt="0x">0x…</button>
-      <button class="chip" data-ledfmt="bare">RRGGBB</button>
-      <button class="chip" data-ledfmt="hash">#RRGGBB</button>
-      <button class="chip" data-ledfmt="rgb">R,G,B</button>
-      <span class="dpFmtHint" id="dpFmtHint">tap each · the one that flashes the LED red is your firmware's format</span>
-    </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Haptics</span>
-      <button class="chip" data-devcmd="VIBE:120:120">Vibe·short</button>
-      <button class="chip" data-devcmd="VIBE:220:400">Vibe·long</button>
-      <button class="chip" data-devcmd="HAPTIC:1">Haptic on</button>
-      <button class="chip" data-devcmd="HAPTIC:0">Haptic off</button>
+      <button class="chip" data-devcmd="VIBE:60:150:0">Tick</button>
+      <button class="chip" data-devcmd="VIBE:60:150:1">Double</button>
+      <button class="chip" data-devcmd="VIBE:60:120:2">Triple</button>
+      <button class="chip" data-devcmd="VIBE:70:400:3">Long</button>
+      <button class="chip" data-devcmd="VIBE:80:150:4">Heartbeat</button>
+      <button class="chip" data-devcmd="VIBE:80:140:5">Ramp</button>
+      <button class="chip" data-devcmd="VIBE:100:100:6">Knock</button>
+      <button class="chip" data-devcmd="VIBE:70:100:7">Train</button>
+      <button class="chip" data-devcmd="VIBE:90:200:8">Escalate</button>
+      <button class="chip" data-devcmd="VIBE:40:600:9">Purr</button>
     </div>
-    <div class="dpCmdGrp"><span class="dpGrpL">Buzzer</span>
-      <button class="chip" data-devcmd="BUZZ:2000:150">Buzz</button>
-      <button class="chip" data-devcmd="BUZZ:1">Buzz on</button>
-      <button class="chip" data-devcmd="SOUND:0">Sound off</button>
+    <div class="dpCmdGrp"><span class="dpGrpL">Hap str.</span>
+      <button class="chip" data-devcmd="HAPCFG:50">50%</button>
+      <button class="chip" data-devcmd="HAPCFG:100">100%</button>
+      <button class="chip" data-devcmd="HAPCFG:150">150%</button>
+      <button class="chip" data-devcmd="HAPCFG:200">200%</button>
+    </div>
+    <div class="dpCmdGrp"><span class="dpGrpL">Pod</span>
+      <button class="chip" data-devcmd="BOTTLE:OUT">Pod out · pause</button>
+      <button class="chip" data-devcmd="BOTTLE:IN">Pod in · resume</button>
+      <button class="chip" data-devcmd="POWERSAVE:AUTO">PS auto</button>
+      <button class="chip" data-devcmd="POWERSAVE:ON">PS on</button>
+      <button class="chip" data-devcmd="POWERSAVE:OFF">PS off</button>
+      <button class="chip" data-devcmd="LIGHTPS:ON">Light saver on</button>
+      <button class="chip" data-devcmd="LIGHTPS:OFF">Light saver off</button>
     </div>
     <div class="dpCmdGrp"><span class="dpGrpL">Ops</span>
       <button class="chip" data-devcmd="TARE">Tare</button>
@@ -1938,20 +1950,28 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
-    <div class="bsub">Light · colour &amp; mode</div>
-    <div class="lightRow">
-      <input type="color" id="bLightColor" value="#46e0d2" aria-label="custom colour">
-      <div class="swatches" id="bglow"><span style="background:#46e0d2" data-c="46e0d2"></span><span style="background:#3b82f6" data-c="3b82f6"></span><span style="background:#22c55e" data-c="22c55e"></span><span style="background:#f43f5e" data-c="f43f5e"></span><span style="background:#ffd166" data-c="ffd166"></span><span style="background:#ffffff" data-c="ffffff"></span></div>
+    <div class="bsub">Reminders — stored on the pod · works even without the phone</div>
+    <div class="chips" id="remEvery">
+      <span class="chip" data-mi="30">30 min</span><span class="chip" data-mi="45">45 min</span>
+      <span class="chip" data-mi="60">1 h</span><span class="chip" data-mi="90">1.5 h</span>
+      <span class="chip" data-mi="120">2 h</span><span class="chip" data-mi="0">Off</span>
     </div>
-    <div class="chips lightModes" id="bLightMode">
-      <span class="chip on" data-m="solid">Solid</span><span class="chip" data-m="breathe">Breathe</span><span class="chip" data-m="pulse">Pulse</span><span class="chip" data-m="rainbow">Rainbow</span><span class="chip" data-m="gradient">Gradient</span><span class="chip" data-m="ring">Ring wave</span>
+    <div class="lightRow" style="align-items:center;gap:8px">
+      <span class="bsub" style="margin:0">Active</span><input type="time" id="remFrom" value="08:00">
+      <span class="bsub" style="margin:0">to</span><input type="time" id="remTo" value="22:00">
     </div>
-    <div class="chips gradSchemes" id="bGradScheme" style="display:none">
-      <span class="chip on" data-g="aurora">Aurora</span><span class="chip" data-g="sunset">Sunset</span><span class="chip" data-g="ocean">Ocean</span><span class="chip" data-g="forest">Forest</span>
+    <div class="chips" id="remOpts">
+      <span class="chip" id="remSmartChip">Smart · a sip skips that round</span>
+      <span class="chip" id="remTest">Preview nudge</span>
     </div>
-    <div class="lightBtns"><button class="chip" id="bLightApply">✦ Apply to bottle</button><button class="chip" id="bLightOff">Off</button></div>
+    <div class="bsub">Reminder light — separate from the bottle's own light</div>
+    <div class="chips" id="remLightRow">
+      <span class="chip" data-c="ffb45a">Amber</span><span class="chip" data-c="46e0d2">Teal</span>
+      <span class="chip" data-c="f43f5e">Red</span><span class="chip" data-c="9a6cff">Purple</span>
+      <span class="chip" data-c="off">No light</span>
+    </div>
     <div class="bsub">Reminder style</div>
-    <div class="chips" id="bstyle"><span class="chip on" data-s="Gentle">Gentle</span><span class="chip" data-s="Standard">Standard</span><span class="chip" data-s="Urgent">Urgent</span><span class="chip" data-s="Custom">Custom…</span></div>
+    <div class="chips" id="bstyle"><span class="chip" data-s="Gentle">Gentle</span><span class="chip" data-s="Standard">Standard</span><span class="chip" data-s="Urgent">Urgent</span></div>
     <div class="bsub">Feedback channels — turn any off (silences both pod + phone)</div>
     <div class="djMasters">
       <button class="djToggle" data-fxtoggle="rgb"   aria-pressed="true"><span class="djIco">✦</span><span class="djLbl">RGB light</span><span class="djState"></span></button>
@@ -2070,7 +2090,29 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
       sy.textContent=cloud?'☁ Synced to your account (cloud)':'Saved to this account on this device'; }
     const lo=$('acctLogout'); if(lo) lo.onclick=()=>{ try{ if(window.ORQA&&ORQA.auth&&ORQA.auth.signOut) ORQA.auth.signOut(); }catch(e){ location.reload(); } };
   }
-  panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on'); toast('Reminder style · '+c.dataset.s); });
+  { // Reminders — mirror REM into the chips; every change re-arms the POD's engine via REMCFG
+    const syncRem=()=>{ saveState(); pushRemCfg(); };
+    const mark=(sel,attr,val)=>panelBody.querySelectorAll(sel).forEach(x=>x.classList.toggle('on', x.dataset[attr]===String(val)));
+    mark('#remEvery .chip','mi', REM.on?REM.mins:0);
+    panelBody.querySelectorAll('#remEvery .chip').forEach(c=>c.onclick=()=>{ const m=+c.dataset.mi; REM.on=m>0; if(m>0)REM.mins=m; mark('#remEvery .chip','mi',m);
+      toast(m?('Reminders every '+(m>=60?(m/60)+' h':m+' min')+' · saved to the pod'):'Reminders off'); syncRem(); });
+    const rf=$('remFrom'), rt=$('remTo');
+    if(rf){ rf.value=REM.from; rf.onchange=()=>{ REM.from=rf.value||'08:00'; toast('Reminders from '+REM.from); syncRem(); }; }
+    if(rt){ rt.value=REM.to;   rt.onchange=()=>{ REM.to=rt.value||'22:00'; toast('Reminders until '+REM.to); syncRem(); }; }
+    const sc=$('remSmartChip'); if(sc){ sc.classList.toggle('on', REM.smart);
+      sc.onclick=()=>{ REM.smart=!REM.smart; sc.classList.toggle('on', REM.smart);
+        toast(REM.smart?'Smart: a sip silences that round':'Reminders fire strictly on schedule'); syncRem(); }; }
+    const tb=$('remTest'); if(tb) tb.onclick=()=>{ if(!POD.cmdChar){ toast('Connect the pod first'); return; }
+      const pt=REM.style==='Gentle'?9:REM.style==='Urgent'?8:1, amp=REM.style==='Gentle'?40:REM.style==='Urgent'?90:70;
+      if(REM.light!=='off') podCommand('LIGHT:'+REM.light+'-201004:cycle:5000');
+      podCommand('VIBE:'+amp+':160:'+pt); toast('Previewing the nudge…'); };
+    mark('#remLightRow .chip','c', REM.light);
+    panelBody.querySelectorAll('#remLightRow .chip').forEach(c=>c.onclick=()=>{ REM.light=c.dataset.c; mark('#remLightRow .chip','c',REM.light);
+      toast('Reminder light · '+c.textContent); syncRem(); });
+    panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.toggle('on', x.dataset.s===REM.style));
+    panelBody.querySelectorAll('#bstyle .chip').forEach(c=>c.onclick=()=>{ panelBody.querySelectorAll('#bstyle .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
+      REM.style=c.dataset.s; toast('Reminder style · '+c.dataset.s); syncRem(); });
+  }
   panelBody.querySelectorAll('.btog').forEach(t=>t.onclick=()=>{ const i=t.querySelector('i'); i.classList.toggle('on'); const on=i.classList.contains('on'); if(t.dataset.t==='haptic'){ if(on){ fxPodVibe(60,200); fxVibratePhone(60); } } else { if(on && FX.sound) podCommand('BUZZ:1'); } toast((t.dataset.t==='haptic'?'Haptic ':'Buzzer ')+(on?'on':'off')); });
   $('ringbtl').onclick=()=>{ fxPodVibe(120,600,'PULSE'); if(typeof glowFlash==='function') glowFlash(0x46e0d2); fxVibratePhone([0,120,60,120]); toast('Ringing your bottle…'); };
   $('addbtl').onclick=()=>toast('Scan a new ORQA bottle to register it');
@@ -2231,6 +2273,13 @@ async function _drainCmdQ(){ if(_cmdBusy) return; _cmdBusy=true;
   _cmdBusy=false;
 }
 window.__podCmd=podCommand;
+// push the app's reminder config onto the pod, where the reminder engine actually runs
+function pushRemCfg(){ if(!POD.cmdChar) return;
+  const mm=t=>{ const [h,m]=String(t||'0:0').split(':').map(Number); return ((h||0)*60+(m||0))%1440; };
+  const si=REM.style==='Gentle'?0:REM.style==='Urgent'?2:1;
+  podCommand('REMCFG:'+(REM.on?REM.mins:0)+':'+mm(REM.from)+':'+mm(REM.to)+':'+(REM.smart?1:0)+':'+(REM.light==='off'?'OFF':REM.light)+':'+si);
+}
+window.__pushRemCfg=pushRemCfg;
 // ACK round-trip: resolves on EVT|ACK:<CMD> / EVT|NAK:<CMD>. Current v11/v12 firmware
 // never ACKs (v12 only NAKs unknown commands), so this resolves {acked:false, sent:true}
 // after the timeout instead of erroring — v13 adds EVT|ACK and makes this a real
@@ -2449,6 +2498,14 @@ function podEvt(str){ const parts=str.split('|'); if(parts[0]!=='EVT') return;
     case 'BOTTLE':  notify(/OUT/i.test(first)?'⊘ Pod popped out of the bottle':'⊙ Pod snapped into a bottle', '#ffb45a'); refreshBottleChip(); break;
     case 'UNSETTLED': notify('… Re-measuring — stand the bottle upright', '#ffb45a'); break;
     case 'DAYRESET':  dayResetLocal(); break;   // pod counters just zeroed — zero ALL app-side daily state too (was: only wasted/_goalHit → cross-day double-count)
+    case 'HIST': {    // offline sip replayed from the pod's flash journal — insert quietly, no FX.
+                      // Totals are NOT added here: syncTotalsFromPod heals intake from the pod counters.
+      const ml=Math.round(v0||0); if(ml<=0) break;
+      const at=(+o.AT>1600000000) ? new Date(+o.AT*1000 + new Date().getTimezoneOffset()*60000) : new Date();
+      SIPLOG.push({ t:at, ml, dur:o.DUR?+o.DUR:null, after:null, before:null, action:'Offline · pod log', health:null });
+      SIPLOG.sort((a,b)=>+new Date(b.t)-+new Date(a.t));
+      saveState(); if(typeof refreshHomeStats==='function') refreshHomeStats(); break; }
+    case 'REMIND':  notify('<span class="nic">💧</span> <b>Time for a sip</b> — bottle nudge', '#ffb45a'); break;
     case 'ACK': { const k=String(first.slice(ci+1)||'').toUpperCase().split(':')[0];
       const w=_ackWaiters[k]; if(w){ clearTimeout(w.t); delete _ackWaiters[k]; w.res({acked:true, sent:true}); } break; }
     case 'CONNECTED': notify('● Pod connected', '#46e0d2'); break;
@@ -2506,11 +2563,33 @@ function podCleanup(){
 // the demo/mock pod has no device, so tear it down directly.
 function disconnectPod(){
   if(!POD.connected){ toast('No pod connected'); return; }
+  POD._userDx=true;                       // deliberate: the auto-reconnector must stand down
+  clearTimeout(_rcTimer);
   const d=POD.device;
   if(d && d.gatt && d.gatt.connected){ try{ d.gatt.disconnect(); }catch(e){ podCleanup(); } }
   else { podCleanup(); }
 }
 window.__disconnectPod=disconnectPod;
+// v9: the link heals itself. On an unexpected drop, retry with backoff (~2 min worth)
+// using the SAME device object — no chooser dialog, no user gesture needed.
+let _rcTimer=null, _rcTries=0;
+function podAutoReconnect(dev){
+  if(POD._userDx) return;
+  clearTimeout(_rcTimer); _rcTries=0;
+  const attempt=async()=>{
+    if(POD.connected || POD._userDx) return;
+    _rcTries++;
+    try{
+      await dev.gatt.connect();
+      await setupPodConnection(dev);
+      notify('● Pod reconnected', '#46e0d2');
+      return;
+    }catch(e){ console.warn('[pod] reconnect attempt '+_rcTries+' failed', e); }
+    if(_rcTries<12){ _rcTimer=setTimeout(attempt, Math.min(1500*_rcTries, 15000)); if(_rcTries===1) toast('Pod link lost — reconnecting…'); }
+    else toast('Pod not found — tap Add my ORQA to reconnect');
+  };
+  _rcTimer=setTimeout(attempt, 1200);     // small grace: pod may just be rebooting
+}
 // shared connection setup — used by the first connect AND the post-restart reconnect.
 // Wires all four characteristics + notifications on an already gatt-connected device.
 async function setupPodConnection(dev){
@@ -2525,11 +2604,13 @@ async function setupPodConnection(dev){
   try{ const evt=await s.getCharacteristic(0x2A5A); await evt.startNotifications(); hook(evt, podEvt); }catch(e){}   // v8 event stream (refill/dispose/goal/…)
   try{ POD.cmdChar=await s.getCharacteristic(0x2A59); }catch(e){ POD.cmdChar=null; }
   POD.device=dev;
-  if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>podCleanup()); }   // attach the drop handler once per device
+  if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>{ podCleanup(); podAutoReconnect(dev); }); }   // drop handler + self-healing reconnect
   if(POD.mock) exitDemoMode();   // a real pod arriving mid-demo: purge demo data BEFORE anchoring totals to it
-  POD.connected=true; POD.mock=false; setDemoBadge(false); POD._sync=null;   // fresh counter-sync anchor on every (re)connect
+  POD.connected=true; POD.mock=false; POD._userDx=false; setDemoBadge(false); POD._sync=null;   // fresh counter-sync anchor on every (re)connect
   clearInterval(POD._mt); POD._mt=null; clearInterval(POD._motT); POD._motT=null;   // stop any demo pod/motion now that a real one is live
   if(POD.cmdChar) podCommand('SETGOAL:'+Math.round(HS.goal));    // push the app's goal onto the pod so PCT/GOAL match
+  if(POD.cmdChar) podCommand('SETTIME:'+Math.floor((Date.now()-new Date().getTimezoneOffset()*60000)/1000));   // local-time epoch → pod real clock + midnight auto day-reset
+  if(POD.cmdChar) pushRemCfg();                                  // pod carries the reminder schedule autonomously
 }
 async function connectPod(){
   if(POD._connecting)return; POD._connecting=true;
@@ -3048,6 +3129,7 @@ let _saveT=null;
 function _persistNow(){ try{
   ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
     hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit, capacity:HS.capacity },
+    rem:{ ...REM },
     tareG:(POD.tareG==null?null:POD.tareG), calFullG:(POD.calFullG==null?null:POD.calFullG),
     lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
     sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
@@ -3067,6 +3149,7 @@ function loadPersisted(reset){ try{
   const s=JSON.parse(ORQA.store.getItem(ST_KEY)||'null'); if(!s||s.v!==1) return;
   if(!DAYHIST.length) (s.hist||[]).forEach(h=>DAYHIST.push(h));
   const h=s.hs||{}; HS.goal=h.goal||HS.goal; if(h.capacity) HS.capacity=h.capacity;
+  if(s.rem) Object.assign(REM, s.rem);               // reminder config survives reloads (and day changes)
   if(s.tareG!==undefined && s.tareG!==null) POD.tareG=s.tareG;   // keep the calibration across reloads
   if(s.calFullG!==undefined && s.calFullG!==null) POD.calFullG=s.calFullG;
   if(s.date!==_stDate){                              // app last ran on a previous day → archive it, start today fresh

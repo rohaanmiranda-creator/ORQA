@@ -1,0 +1,40 @@
+{
+  "packageId": "in.orqa.app.test",
+  "host": "rohaanmiranda-creator.github.io",
+  "name": "ORQA",
+  "launcherName": "ORQA",
+  "display": "standalone",
+  "themeColor": "#0B1F2A",
+  "themeColorDark": "#0B1F2A",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#0B1F2A",
+  "enableNotifications": false,
+  "startUrl": "/ORQA/index.html",
+  "iconUrl": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/icons/icon-512.png",
+  "maskableIconUrl": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/icons/icon-512.png",
+  "appVersionName": "0.1.0",
+  "appVersionCode": 1,
+  "webManifestUrl": "https://raw.githubusercontent.com/rohaanmiranda-creator/ORQA/test/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://rohaanmiranda-creator.github.io/ORQA/",
+  "minSdkVersion": 21,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "android"
+  },
+  "splashScreenFadeOutDuration": 300,
+  "generatorApp": "bubblewrap-cli"
+}

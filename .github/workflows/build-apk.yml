@@ -1,0 +1,87 @@
+name: Build test APK (TWA)
+on:
+  workflow_dispatch:
+  push:
+    branches: [test]
+    paths:
+      - 'twa-manifest.json'
+      - 'icons/**'
+      - '.github/workflows/build-apk.yml'
+permissions:
+  contents: write   # allow publishing the APK as a GitHub Release asset
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+      - name: Point Bubblewrap at the runner's JDK + Android SDK
+        run: |
+          mkdir -p ~/.bubblewrap
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > ~/.bubblewrap/config.json
+          cat ~/.bubblewrap/config.json
+      - name: Accept Android SDK licenses
+        run: yes | "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+      - name: Generate a throwaway signing key (sideload/testing only)
+        run: |
+          keytool -genkeypair -v -keystore android.keystore -alias android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass orqatest -keypass orqatest \
+            -dname "CN=ORQA Test, O=ORQA, L=NA, S=NA, C=IN"
+      - name: Work around Bubblewrap SDK path check (legacy 'tools' dir)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "SDK=$SDK"; ls -la "$SDK"
+          # modern runners ship cmdline-tools/ but not the legacy tools/ that Bubblewrap validates
+          if [ ! -e "$SDK/tools" ]; then sudo ln -sfn "$SDK/cmdline-tools/latest" "$SDK/tools"; fi
+          ls -la "$SDK/tools/bin" | head
+          echo "---- how Bubblewrap validates the SDK (for reference) ----"
+          grep -rn "isn't correct" "$(npm root -g)/@bubblewrap" 2>/dev/null | head || true
+      - name: Build TWA APK
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: orqatest
+          BUBBLEWRAP_KEY_PASSWORD: orqatest
+        run: |
+          set -x
+          # generate the Android project + checksum non-interactively, then build (no prompts)
+          bubblewrap update --skipVersionUpgrade --appVersionName 0.2.0 --appVersionCode 2 < /dev/null
+          bubblewrap build --skipPwaValidation < /dev/null
+      - name: Show outputs
+        run: ls -la ./*.apk ./*.aab 2>/dev/null || true
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orqa-test-apk
+          path: |
+            ./*.apk
+            ./*.aab
+          if-no-files-found: warn
+      - name: Publish APK to a GitHub Release (one-tap sideload beta)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK="$(ls -1 ./*.apk 2>/dev/null | head -n1)"
+          echo "picked APK: $APK"
+          if [ -z "$APK" ]; then echo "No APK produced — skipping release."; exit 1; fi
+          cp "$APK" orqa-beta.apk
+          # a stable moving 'beta' tag so the download link never changes
+          gh release delete beta --yes --cleanup-tag 2>/dev/null || true
+          gh release create beta orqa-beta.apk \
+            --title "ORQA Beta (Android sideload)" \
+            --notes "One-tap install APK for beta testing on a physical Android phone.
+
+          - Wraps the live app at https://rohaanmiranda-creator.github.io/ORQA/ (Trusted Web Activity).
+          - **Web Bluetooth is enabled** so the app can talk to the HydrationPod hardware.
+          - Install: download **orqa-beta.apk** on the phone, open it, allow install from unknown sources.
+          - Content stays current with the hosted site automatically — this APK does not need rebuilding when the app UI changes.
+
+          Signed with a throwaway test key (not for Play Store)."
