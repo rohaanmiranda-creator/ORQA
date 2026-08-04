@@ -2047,7 +2047,9 @@ function sendDevCmd(cmd){ cmd=(cmd||'').trim(); if(!cmd) return;
   logDevCmd('→ '+cmd,'lgSent');
   if(typeof podCommandAck==='function'){ podCommandAck(cmd, 2000).then(r=>{
     if(r.acked) logDevCmd('✓ '+cmd,'lgOk','ACK');
-    else if(r.sent) logDevCmd('✓ '+cmd,'lgWarn','written (no ACK — v11/v12 firmware doesn’t ACK)');
+    else if(r.sent) logDevCmd('✓ '+cmd,'lgWarn', POD.evtOk===false
+      ? 'written · event channel missing — reconnect the pod to receive ACKs'
+      : 'written · no ACK within 2s (pod busy or event stream dropped — reconnect if it persists)');
     else logDevCmd('✗ '+cmd,'lgErr','write failed'); }); }
   else podCommand(cmd);
 }
@@ -2673,7 +2675,15 @@ async function setupPodConnection(dev){
     ch._orqaH=e=>fn(new TextDecoder().decode(e.target.value)); ch.addEventListener('characteristicvaluechanged', ch._orqaH); };
   const live=await s.getCharacteristic(BLE_LIVE); await live.startNotifications(); hook(live, podLive);
   const sip=await s.getCharacteristic(BLE_SIP); await sip.startNotifications(); hook(sip, podSip);
-  try{ const evt=await s.getCharacteristic(BLE_EVT); await evt.startNotifications(); hook(evt, podEvt); }catch(e){}   // v8 event stream (refill/dispose/goal/…)
+  // v8 event stream (refill/dispose/goal/ACK/history). A silent failure here used to
+  // orphan ACKs + offline-history sync for the whole session — now we retry, flag it,
+  // and the console explains instead of blaming the firmware.
+  POD.evtOk=false;
+  for(let _i=0;_i<2 && !POD.evtOk;_i++){
+    try{ const evt=await s.getCharacteristic(BLE_EVT); await evt.startNotifications(); hook(evt, podEvt); POD.evtOk=true; }
+    catch(e){ console.warn('[pod] evt subscribe failed (try '+(_i+1)+')', e); await new Promise(r=>setTimeout(r,350)); }
+  }
+  if(!POD.evtOk) toast('Pod event channel missing — ACKs & offline history won’t arrive; reconnect the pod');
   try{ POD.cmdChar=await s.getCharacteristic(BLE_CMD); }catch(e){ POD.cmdChar=null; }
   POD.device=dev;
   if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>{ podCleanup(); podAutoReconnect(dev); }); }   // drop handler + self-healing reconnect
