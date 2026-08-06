@@ -2489,6 +2489,7 @@ function celebrateStreak(){      // STREAK → chime + party-pop + rainbow comet
 window.__fxEngine={ FX, fxSetMaster, celebrateMilestone, celebrateStreak, fxSip, fxAdded, fxRemoved };
 // charLive — the periodic telemetry snapshot
 function podLive(str){
+  if(str && str.slice(0,3)==='DR|'){ podDiagRaw(str); return; }                            // v5 fast raw load-cell stream (~7 Hz, Dev tab)
   if(str && (str.slice(0,3)==='D1|' || str.slice(0,3)==='D2|')){ podDiag(str); return; }   // v5 diagnostic frames share the live characteristic
   if(!str || str.indexOf("|T:")<0 || str.length<40){ return; }
   const o=_kv(str);
@@ -3070,7 +3071,7 @@ window.__podFrame={ live:s=>podLive(s), evt:s=>podEvt(s), sip:s=>podSip(s) };   
 const DIAG={ have:false, lastD:0, unsupported:false, v:null,
   raw:null, tare:null, scale:null, cell:null, pins:null, slp:false, imu:null, hap:null,
   ps:[0,0], usb:false, chg:false, bot:true, up:0, hist:null,
-  led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null };
+  led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null, trace:[] };
 const DEVDEC=[]; let _devDecV=0;
 const LEDMODES=['off','solid','gradient','rainbow','spin','pulse','breathe'];
 const OVLNAMES=['none','app effect','reminder','find-my-pod ring'];
@@ -3088,6 +3089,31 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.PW) DIAG.pw=o.PW.split('/').map(Number);
   }
   updateDevTab(); }
+// DR| fast raw stream — update just the raw readout + trace, not the whole panel
+function podDiagRaw(str){ const o=_kv(str); const r=+o.RAW; if(!Number.isFinite(r)) return;
+  DIAG.raw=r; if(o.CELL) DIAG.cell=o.CELL; DIAG.lastD=Date.now(); DIAG.have=true; DIAG.unsupported=false;
+  DIAG.trace.push(r); while(DIAG.trace.length>90) DIAG.trace.shift();
+  if(activeTab!=='development') return;
+  const n=document.getElementById('dvRaw'); if(n) n.textContent=Math.round(r).toLocaleString();
+  const g=document.getElementById('dvRawG'); if(g && o.G!==undefined){ const gv=+o.G;
+    if(Number.isFinite(gv)) g.textContent=(gv>=0?'+':'')+gv.toFixed(1)+' g'; }
+  drawRawTrace(); }
+function drawRawTrace(){ const cv=document.getElementById('dvRawGraph'); if(!cv) return;
+  const w=cv.clientWidth||280; if(cv.width!==w) cv.width=w; const h=cv.height;
+  const ctx=cv.getContext('2d'); ctx.clearRect(0,0,w,h);
+  const tr=DIAG.trace; if(tr.length<2) return;
+  let mn=Infinity,mx=-Infinity; tr.forEach(v=>{ if(v<mn)mn=v; if(v>mx)mx=v; });
+  const span=Math.max(mx-mn, 200);      // never flat-line: minimum ±100-count window
+  const lo=(mn+mx)/2-span/2;
+  if(DIAG.tare!=null){ const ty=h-3-((DIAG.tare-lo)/span)*(h-6);   // tare reference
+    if(ty>0&&ty<h){ ctx.strokeStyle='rgba(255,255,255,.22)'; ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(0,ty); ctx.lineTo(w,ty); ctx.stroke(); ctx.setLineDash([]); } }
+  ctx.strokeStyle='#46e0d2'; ctx.lineWidth=1.6; ctx.beginPath();
+  tr.forEach((v,i)=>{ const x=i/(tr.length-1)*(w-2)+1, y=h-3-((v-lo)/span)*(h-6);
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  ctx.fillStyle='rgba(159,217,230,.8)'; ctx.font='9px system-ui';
+  ctx.fillText(Math.round(mx).toLocaleString(), 4, 10); ctx.fillText(Math.round(mn).toLocaleString(), 4, h-4); }
 // one human sentence per gesture verdict — the "was that a sip or a discard, and why"
 function devDecide(verdict, o){
   const d=+o.D, peak=+o.PEAK, dur=+o.DUR, pre=+o.PRE, post=+o.POST, why=(o.WHY||'').toUpperCase();
@@ -3144,7 +3170,10 @@ function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
       <div class="teleCard"><span class="tlk">FULL · COMPUTED</span><b class="tlv" id="dvFull">—</b></div>
       <div class="teleCard"><span class="tlk">SCALE COUNTS/G</span><b class="tlv" id="dvScale">—</b></div>
       <div class="teleCard"><span class="tlk">NET WATER · POD</span><b class="tlv" id="dvNet">—</b></div>
+      <div class="teleCard raw"><span class="tlk">Δ FROM TARE</span><b class="tlv" id="dvRawG">—</b></div>
+      <div class="teleCard" style="grid-column:1/-1"><span class="tlk">LIVE TRACE · ~7 Hz — press the cell and watch</span><canvas id="dvRawGraph" height="64" style="width:100%;display:block;margin-top:4px"></canvas></div>
     </div>
+    <button class="devBtn" id="dvHxProbe">↻ Re-detect load cell</button>
     <div class="bsub" style="margin-top:8px">App-side 2-point calibration (gross grams: empty → full = ${HS.capacity} ml)</div>
     <div class="calStat" id="dvCalStat">not calibrated</div>
     <div class="dpBtns">
@@ -3209,6 +3238,7 @@ function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
   { const e=$d('dvCalE'); if(e) e.onclick=()=>{ if(typeof calSet==='function') calSet('empty'); updateDevTab(); }; }
   { const f=$d('dvCalF'); if(f) f.onclick=()=>{ if(typeof calSet==='function') calSet('full'); updateDevTab(); }; }
   { const c=$d('dvCalC'); if(c) c.onclick=()=>{ if(typeof calClear==='function') calClear(); updateDevTab(); }; }
+  { const hp=$d('dvHxProbe'); if(hp) hp.onclick=()=>{ if(podCommand('HXPROBE')) toast('Probing for the load cell… (~3 s)'); else toast('Connect the pod first'); }; }
   { const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
     const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const v=Math.round(+$d('dvCap').value);
       if(!(v>=100 && v<=5000)){ toast('Capacity must be 100–5000 mAh'); return; }
