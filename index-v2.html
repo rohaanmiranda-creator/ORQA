@@ -1904,6 +1904,11 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
   </div>
   <div class="insHair"></div>
   <div class="insSec"><div class="lbl">CUSTOMIZE FEEDBACK</div>
+    <div class="bsub">Pod placement — pausing stops all drink tracking &amp; sleeps the load cell (saved on the pod)</div>
+    <div class="chips" id="podPlaceRow">
+      <span class="chip" data-p="in">In the bottle · tracking</span>
+      <span class="chip" data-p="out">Out of the bottle · paused</span>
+    </div>
     <div class="bsub">Always-on light</div>
     <div class="chips" id="ledModeRow">
       <span class="chip" data-m="off">Off</span><span class="chip" data-m="solid">Solid</span>
@@ -2094,6 +2099,16 @@ function renderBottle(){ panelBody.innerHTML=bottleHTML(); if(typeof fxSyncToggl
     mark('#remSolidRow .chip','a', REM.lightAnim);
     panelBody.querySelectorAll('#remSolidRow .chip').forEach(c=>c.onclick=()=>{ REM.lightAnim=c.dataset.a; mark('#remSolidRow .chip','a',REM.lightAnim);
       toast('Reminder · '+c.dataset.a); syncRem(); });
+  }
+  { // Pod placement — mirrors the pod's own persisted in/out state, live-synced
+    const upd=()=>{ panelBody.querySelectorAll('#podPlaceRow .chip').forEach(x=>
+      x.classList.toggle('on', (x.dataset.p==='out')===(POD.state==='OUT'))); };
+    window.__podPlaceUI=upd; upd();
+    panelBody.querySelectorAll('#podPlaceRow .chip').forEach(c=>c.onclick=()=>{
+      if(!POD.cmdChar){ toast('Connect the pod first'); return; }
+      podCommand(c.dataset.p==='out'?'BOTTLE:OUT':'BOTTLE:IN');
+      toast(c.dataset.p==='out'?'Pod out — tracking paused · survives reboot':'Pod in — tracking resumed');
+    });
   }
   { // Always-on light — mode, colours (multi for gradient/spin/pulse/breathe), brightness, power saver
     const syncLed=()=>{ saveState(); pushLedCfg(); };
@@ -2468,6 +2483,7 @@ function podLive(str){ if(!str || str.indexOf("|T:")<0 || str.length<40){ return
   if(o.VBAT!==undefined){ const _v=+o.VBAT; if(isFinite(_v)&&_v>0) POD.voltage=_v; }   // measured pack voltage (on-board divider); ignore malformed/empty
   if(o.T!==undefined) POD.deviceTime=o.T;   // device clock hh:mm:ss → live-monitor timestamp
   if(POD.connected && !POD.mock) syncTotalsFromPod(o);
+  if(window.__podPlaceUI) window.__podPlaceUI();     // in/out chips track the pod's real state
   refreshLive(); }
 // The pod's absolute daily counters (TOT/DTOT) are the source of truth for totals:
 // a missed or duplicated SIP/DISPOSE notification shows up as a persistent offset
@@ -2510,7 +2526,8 @@ function podEvt(str){ const parts=str.split('|'); if(parts[0]!=='EVT') return;
     case 'DISPOSE': if(o.VOL!==undefined)POD.waterMl=num(o.VOL,POD.waterMl); if(o.DTOT!==undefined)POD.disposeMl=num(o.DTOT,POD.disposeMl); podDispose(v0||0, o.PEAK?+o.PEAK:null); break;
     case 'GOAL':    onPodGoal(); break;
     case 'READY':   notify('✓ Pod ready', '#22c55e'); refreshBottleChip(); refreshBottleLive(); break;
-    case 'BOTTLE':  notify(/OUT/i.test(first)?'⊘ Pod popped out of the bottle':'⊙ Pod snapped into a bottle', '#ffb45a'); refreshBottleChip(); break;
+    case 'BOTTLE':  POD.state=/OUT/i.test(first)?'OUT':'IDLE'; if(window.__podPlaceUI)window.__podPlaceUI();   // flip the placement chips on the pod's own confirmation, not the next frame
+                    notify(/OUT/i.test(first)?'⊘ Pod popped out of the bottle':'⊙ Pod snapped into a bottle', '#ffb45a'); refreshBottleChip(); break;
     case 'UNSETTLED': notify('… Re-measuring — stand the bottle upright', '#ffb45a'); break;
     case 'DAYRESET':  dayResetLocal(); break;   // pod counters just zeroed — zero ALL app-side daily state too (was: only wasted/_goalHit → cross-day double-count)
     case 'HIST': {    // offline sip replayed from the pod's flash journal — insert quietly, no FX.
