@@ -812,6 +812,32 @@
   .dvTbl{ width:100%; border-collapse:collapse; font-size:11px; color:#9fd9e6; margin-top:4px; }
   .dvTbl td{ padding:4px 6px; border-top:1px solid rgba(255,255,255,.07); } .dvTbl td:last-child{ text-align:right; color:#eafcff; }
   .dvCapIn{ width:70px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); border-radius:8px; color:#eafcff; padding:4px 6px; font-size:12px; }
+  /* Dev tab as a settings page — dark, blue-accented, sub-pages slide in/out */
+  .dvMenu{ display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+  .dvItem{ display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:14px; background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.22); cursor:pointer; transition:background .15s; }
+  .dvItem:active{ transform:scale(.985); background:rgba(59,130,246,.16); }
+  .dvItem .ic{ width:34px; height:34px; border-radius:10px; background:rgba(59,130,246,.18); display:flex; align-items:center; justify-content:center; font-size:16px; flex:none; }
+  .dvItem .tx{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .dvItem .tt{ font-size:13.5px; color:#eaf3ff; font-weight:600; }
+  .dvItem .ts{ font-size:11px; color:#7fa6c8; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dvItem .ch{ color:#5b83a8; font-size:19px; flex:none; }
+  .dvHead{ display:flex; align-items:center; gap:8px; margin:2px 0 10px; }
+  .dvBack{ font-size:24px; line-height:1; color:#8fc1ff; cursor:pointer; padding:2px 12px 5px 2px; }
+  .dvBack:active{ transform:translateX(-2px); }
+  .dvHT{ font-size:15px; font-weight:600; color:#eaf3ff; }
+  @keyframes dvPush{ from{ transform:translateX(30px); opacity:0 } to{ transform:none; opacity:1 } }
+  @keyframes dvPop{ from{ transform:translateX(-30px); opacity:0 } to{ transform:none; opacity:1 } }
+  .dvAnimIn{ animation:dvPush .26s ease both; }
+  .dvAnimBack{ animation:dvPop .26s ease both; }
+  .dvStep{ display:flex; gap:11px; align-items:flex-start; padding:11px 12px; border-radius:12px; background:rgba(59,130,246,.07); border:1px solid rgba(59,130,246,.18); margin:7px 0; }
+  .dvStep .n{ width:22px; height:22px; border-radius:50%; background:rgba(59,130,246,.25); color:#bcd9ff; font-size:12px; display:flex; align-items:center; justify-content:center; flex:none; margin-top:1px; }
+  .dvStep .sx{ flex:1; font-size:12px; color:#cfe4f7; line-height:1.45; }
+  .dvStep .sx b{ color:#eaf3ff; }
+  .dvStep .ss{ font-size:11px; color:#7fa6c8; margin-top:3px; }
+  .dvStep .evJoin{ flex:none; margin-top:2px; }
+  .dv .lbl{ color:#9cc4f0; }
+  .dv .devBtn{ border-color:rgba(59,130,246,.32); background:rgba(59,130,246,.09); }
+  .dv .evJoin{ color:#bcd9ff; border-color:rgba(59,130,246,.45); background:rgba(59,130,246,.14); }
   .tareProj{ background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:16px; padding:12px 13px; margin:6px 0; }
   .tpHead{ font-size:9.5px; letter-spacing:.16em; color:#7fb0c0; margin-bottom:8px; }
   .tpBar{ height:10px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; margin-bottom:9px; }
@@ -2590,6 +2616,9 @@ function podEvt(str){ const parts=str.split('|'); if(parts[0]!=='EVT') return;
     case 'REBOOTING': clearTimeout(POD._restartWatch); notify('<span class="nic">↻</span> Pod rebooting…', '#9fd9e6'); break;   // RESTART accepted by the pod
     case 'DFU':       notify('<span class="nic">⬆</span> Pod in update mode — flash from your Mac', '#9af0e6'); break;
     case 'DECIDE': devDecide(String(first.slice(ci+1)||'').toUpperCase(), o); break;   // v5: the sip engine explains each gesture verdict
+    case 'CALW': { const sc=o.SC||'?'; DIAG.calRes={ g:v0||0, sc:sc, raw:o.RAW||null }; DIAG.scale=num(o.SC,DIAG.scale);
+      notify('<span class="nic">⚖️</span> Pod scale calibrated — <b>'+sc+' counts/g</b> against '+(v0||'?')+' g. Verify in step 3.', '#3b82f6');
+      if(typeof updateDevTab==='function') updateDevTab(); break; }   // v5 calibration test result
     case 'NAK': { const rej=String(first.slice(ci+1)||o.NAK||'command'); const k=rej.toUpperCase().split(':')[0];
       const w=_ackWaiters[k]; if(w){ clearTimeout(w.t); delete _ackWaiters[k]; w.res({acked:false, sent:true, nak:true}); }
       if(k==='DBG'){ DIAG.unsupported=true; if(typeof updateDevTab==='function') updateDevTab(); break; }   // pre-v5 firmware — Dev tab shows its own banner, no toast spam
@@ -3092,7 +3121,8 @@ window.__podFrame={ live:s=>podLive(s), evt:s=>podEvt(s), sip:s=>podSip(s) };   
 const DIAG={ have:false, lastD:0, unsupported:false, v:null,
   raw:null, tare:null, scale:null, cell:null, pins:null, slp:false, imu:null, hap:null,
   ps:[0,0], usb:false, chg:false, bot:true, up:0, hist:null,
-  led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null, trace:[] };
+  led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null, trace:[],
+  view:null, calRes:null, lastDR:0 };
 const DEVDEC=[]; let _devDecV=0;
 const LEDMODES=['off','solid','gradient','rainbow','spin','pulse','breathe'];
 const OVLNAMES=['none','app effect','reminder','find-my-pod ring'];
@@ -3112,12 +3142,15 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
   updateDevTab(); }
 // DR| fast raw stream — update just the raw readout + trace, not the whole panel
 function podDiagRaw(str){ const o=_kv(str); const r=+o.RAW; if(!Number.isFinite(r)) return;
-  DIAG.raw=r; if(o.CELL) DIAG.cell=o.CELL; DIAG.lastD=Date.now(); DIAG.have=true; DIAG.unsupported=false;
+  DIAG.raw=r; if(o.CELL) DIAG.cell=o.CELL; DIAG.lastD=Date.now(); DIAG.lastDR=Date.now(); DIAG.have=true; DIAG.unsupported=false;
   DIAG.trace.push(r); while(DIAG.trace.length>90) DIAG.trace.shift();
   if(activeTab!=='development') return;
   const n=document.getElementById('dvRaw'); if(n) n.textContent=Math.round(r).toLocaleString();
-  const g=document.getElementById('dvRawG'); if(g && o.G!==undefined){ const gv=+o.G;
-    if(Number.isFinite(gv)) g.textContent=(gv>=0?'+':'')+gv.toFixed(1)+' g'; }
+  const gv=(o.G!==undefined && Number.isFinite(+o.G)) ? +o.G : null;
+  const g=document.getElementById('dvRawG'); if(g && gv!=null) g.textContent=(gv>=0?'+':'')+gv.toFixed(1)+' g';
+  const ver=document.getElementById('dvCalVer');   // calibration verify line, live at ~7 Hz
+  if(ver && gv!=null){ const ri=document.getElementById('dvCalRef');
+    ver.innerHTML=_dvVerifyText(gv, ri?Math.round(+ri.value):0); }
   drawRawTrace(); }
 function drawRawTrace(){ const cv=document.getElementById('dvRawGraph'); if(!cv) return;
   const w=cv.clientWidth||280; if(cv.width!==w) cv.width=w; const h=cv.height;
@@ -3162,48 +3195,78 @@ function _dvUp(s){ if(!Number.isFinite(s)||s<=0) return '—'; const h=Math.floo
   return (h?h+'h ':'')+m+'m '+Math.floor(s%60)+'s'; }
 function _dvLife(hours){ if(!Number.isFinite(hours)||hours<=0) return '—';
   return hours>=48 ? (hours/24).toFixed(1)+' days' : Math.round(hours)+' h'; }
-function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
-  <div class="insLede">Raw pod internals — <b>everything the firmware knows</b>, live.</div>
+function renderDevTab(){ _dvRender(null);
+  clearInterval(DIAG._iv);
+  DIAG._iv=setInterval(()=>{ if(activeTab==='development') updateDevTab(); else { clearInterval(DIAG._iv); DIAG._iv=null; } }, 1000);
+  updateDevTab(); }
+// settings-style navigation: a root menu of sections, sub-pages slide in, ‹ back slides out
+const DVSECTIONS=[
+  { k:'link',   ic:'🛰', t:'Pod link',                s:'connection · frames · uptime' },
+  { k:'hw',     ic:'🧩', t:'Hardware presence',       s:'what is really wired in' },
+  { k:'cell',   ic:'⚖️', t:'Load cell · calibration', s:'raw counts · live trace · cal test' },
+  { k:'engine', ic:'🥤', t:'Sip engine · decisions',  s:'why each gesture counted or not' },
+  { k:'log',    ic:'📜', t:'Raw sip log',             s:'today’s sips, refills, discards' },
+  { k:'lights', ic:'💡', t:'Lights',                  s:'stored vs working RGB config' },
+  { k:'power',  ic:'🔋', t:'Battery & power',         s:'per-component draw · est. life' } ];
+function dvNav(k, pop){ DIAG.view=k||null; _dvRender(pop?'pop':(k?'push':null)); }
+function _dvRender(anim){
+  const v=DIAG.view;
+  const cls='ins dv'+(anim==='push'?' dvAnimIn':anim==='pop'?' dvAnimBack':'');
+  panelBody.innerHTML='<div class="'+cls+'">'+(v?_dvSubHTML(v):_dvRootHTML())+'</div>';
+  _dvWire(v);
+  _devDecV++; _dvSipKey='';                       // sub-page lists rebuild fresh
+  updateDevTab(); }
+function _dvRootHTML(){
+  return `<div class="insLede">Raw pod internals — <b>everything the firmware knows</b>, live.</div>
   <div id="dvBanner" class="dvBanner">—</div>
-  <div class="insSec"><div class="lbl">POD LINK</div>
+  <div class="dvMenu">`+DVSECTIONS.map(x=>
+    `<div class="dvItem" data-dv="${x.k}"><span class="ic">${x.ic}</span><span class="tx"><span class="tt">${x.t}</span><span class="ts" id="dvm_${x.k}">${x.s}</span></span><span class="ch">›</span></div>`).join('')+`</div>`; }
+function _dvSubHTML(v){
+  const sec=DVSECTIONS.find(x=>x.k===v)||{t:'Development'};
+  const head=`<div class="dvHead"><span class="dvBack" id="dvBackBtn">‹</span><span class="dvHT">${sec.t}</span></div>
+  <div id="dvBanner" class="dvBanner">—</div>`;
+  if(v==='link') return head+`
     <div class="bstats">
       <div class="brow"><span>Connection</span><b id="dvConn">—</b></div>
       <div class="brow"><span>Last frame</span><b id="dvAge">—</b></div>
       <div class="brow"><span>Pod uptime</span><b id="dvUp">—</b></div>
       <div class="brow"><span>Diagnostics firmware</span><b id="dvVer">—</b></div>
       <div class="brow"><span>Offline sip journal</span><b id="dvHist">—</b></div>
-    </div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">HARDWARE PRESENCE</div>
+    </div>`;
+  if(v==='hw') return head+`
     <div class="bsub">detected live by the pod — a chip that answers vs a sensor that's really wired in</div>
     <div class="teleGrid">
       <div class="teleCard" id="dvHwCell"><span class="tlk">LOAD CELL</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwImu"><span class="tlk">IMU · MOTION</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwHap"><span class="tlk">HAPTIC DRIVER</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwPins"><span class="tlk">HX711 WIRING</span><b class="tlv">—</b></div>
-    </div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">LOAD CELL · RAW</div>
+    </div>`;
+  if(v==='cell') return head+`
     <div class="teleGrid">
       <div class="teleCard raw"><span class="tlk">RAW COUNTS · LIVE</span><b class="tlv" id="dvRaw">—</b></div>
+      <div class="teleCard raw"><span class="tlk">Δ FROM TARE</span><b class="tlv" id="dvRawG">—</b></div>
       <div class="teleCard"><span class="tlk">CELL STATE</span><b class="tlv" id="dvCellSt">—</b></div>
+      <div class="teleCard"><span class="tlk">NET WATER · POD</span><b class="tlv" id="dvNet">—</b></div>
       <div class="teleCard"><span class="tlk">EMPTY = TARE COUNTS</span><b class="tlv" id="dvTare">—</b></div>
       <div class="teleCard"><span class="tlk">FULL · COMPUTED</span><b class="tlv" id="dvFull">—</b></div>
-      <div class="teleCard"><span class="tlk">SCALE COUNTS/G</span><b class="tlv" id="dvScale">—</b></div>
-      <div class="teleCard"><span class="tlk">NET WATER · POD</span><b class="tlv" id="dvNet">—</b></div>
-      <div class="teleCard raw"><span class="tlk">Δ FROM TARE</span><b class="tlv" id="dvRawG">—</b></div>
       <div class="teleCard" style="grid-column:1/-1"><span class="tlk">LIVE TRACE · ~7 Hz — press the cell and watch</span><canvas id="dvRawGraph" height="64" style="width:100%;display:block;margin-top:4px"></canvas></div>
     </div>
-    <button class="devBtn" id="dvHxProbe">↻ Re-detect load cell</button>
-    <div class="bsub" style="margin-top:8px">App-side 2-point calibration (gross grams: empty → full = ${HS.capacity} ml)</div>
+    <div class="lbl" style="margin-top:16px">CALIBRATION TEST · POD SCALE</div>
+    <div class="bsub">teaches the pod its counts→grams factor so sips read out in real ml. Current: <b id="dvScale">—</b> counts/g</div>
+    <div class="dvStep"><span class="n">1</span><div class="sx"><b>Empty the cell</b> — nothing (or the empty bottle) on it, hold still, tare<div class="ss" id="dvCalS1">tare = the raw zero point</div></div><span class="evJoin" id="dvCalTare">Tare</span></div>
+    <div class="dvStep"><span class="n">2</span><div class="sx"><b>Place a known weight</b> and enter its grams (water: 1 ml = 1 g)<div class="ss">reference <input id="dvCalRef" class="dvCapIn" type="number" min="20" max="5000" value="200"> g</div></div><span class="evJoin" id="dvCalGo">Calibrate</span></div>
+    <div class="dvStep"><span class="n">3</span><div class="sx"><b>Verify accuracy</b> — keep (or re-place) the weight; within ±3 % is good<div class="ss" id="dvCalVer">waiting for a live reading…</div></div></div>
+    <div class="calStat" id="dvCalScale">—</div>
+    <div class="lbl" style="margin-top:16px">APP-SIDE 2-POINT CALIBRATION</div>
+    <div class="bsub">independent of the pod: maps gross grams empty → full = ${HS.capacity} ml in the app only</div>
     <div class="calStat" id="dvCalStat">not calibrated</div>
     <div class="dpBtns">
       <button class="devBtn" id="dvCalE">① Set empty</button>
       <button class="devBtn" id="dvCalF">② Set full</button>
       <button class="devBtn" id="dvCalC">Clear</button>
-    </div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">SIP ENGINE · REASONING</div>
+    </div>
+    <button class="devBtn" id="dvHxProbe">↻ Re-detect load cell</button>`;
+  if(v==='engine') return head+`
     <div class="teleGrid">
       <div class="teleCard"><span class="tlk">STATE</span><b class="tlv" id="dvSt">—</b></div>
       <div class="teleCard"><span class="tlk">TILT</span><b class="tlv" id="dvTilt">—</b></div>
@@ -3220,17 +3283,15 @@ function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
       <tr><td>Ignored as noise</td><td>±5 ml · &gt;400 ml · &lt;0.5 s tilts</td></tr>
     </table>
     <div class="bsub" style="margin-top:10px">Decision log — every gesture the pod evaluated, and why</div>
-    <div class="dvLog" id="dvDecLog"></div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">SIP LOG · RAW</div>
+    <div class="dvLog" id="dvDecLog"></div>`;
+  if(v==='log') return head+`
     <div class="bstats">
       <div class="brow"><span>Sips today</span><b id="dvSips">—</b></div>
       <div class="brow"><span>Refills today</span><b id="dvRef">—</b></div>
       <div class="brow"><span>Discarded today</span><b id="dvDisp">—</b></div>
     </div>
-    <div class="dvLog" id="dvSipLog"></div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">LIGHTS · STORED vs WORKING</div>
+    <div class="dvLog" id="dvSipLog"></div>`;
+  if(v==='lights') return head+`
     <div id="dvLedMatch" class="dvBanner">—</div>
     <div class="bstats">
       <div class="brow"><span>App stored</span><b id="dvLedApp">—</b></div>
@@ -3238,9 +3299,8 @@ function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
       <div class="brow"><span>Brightness · saver</span><b id="dvLedB">—</b></div>
       <div class="brow"><span>Overlay now</span><b id="dvLedOvl">—</b></div>
       <div class="brow"><span>Reminder light</span><b id="dvLedRem">—</b></div>
-    </div></div>
-  <div class="insHair"></div>
-  <div class="insSec"><div class="lbl">BATTERY &amp; POWER</div>
+    </div>`;
+  if(v==='power') return head+`
     <div class="teleGrid">
       <div class="teleCard"><span class="tlk">BATTERY</span><b class="tlv" id="dvBatt">—</b></div>
       <div class="teleCard"><span class="tlk">POWER SOURCE</span><b class="tlv" id="dvSrc">—</b></div>
@@ -3253,21 +3313,27 @@ function renderDevTab(){ panelBody.innerHTML=`<div class="ins">
       <div class="brow"><span>Est. life · connected like now</span><b id="dvLifeNow">—</b></div>
       <div class="brow"><span>Est. life · standalone, app closed</span><b id="dvLifeSolo">—</b></div>
     </div>
-    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>
-  </div></div>`;
+    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>`;
+  return head; }
+function _dvWire(v){
   const $d=id=>document.getElementById(id);
-  { const e=$d('dvCalE'); if(e) e.onclick=()=>{ if(typeof calSet==='function') calSet('empty'); updateDevTab(); }; }
-  { const f=$d('dvCalF'); if(f) f.onclick=()=>{ if(typeof calSet==='function') calSet('full'); updateDevTab(); }; }
-  { const c=$d('dvCalC'); if(c) c.onclick=()=>{ if(typeof calClear==='function') calClear(); updateDevTab(); }; }
-  { const hp=$d('dvHxProbe'); if(hp) hp.onclick=()=>{ if(podCommand('HXPROBE')) toast('Probing for the load cell… (~3 s)'); else toast('Connect the pod first'); }; }
-  { const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
-    const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const v=Math.round(+$d('dvCap').value);
-      if(!(v>=100 && v<=5000)){ toast('Capacity must be 100–5000 mAh'); return; }
-      if(podCommand('BATTCAP:'+v)) toast('Capacity '+v+' mAh — saved on the pod'); else toast('Connect the pod first'); }; }
-  _devDecV++;                                   // force the log lists to rebuild
-  clearInterval(DIAG._iv);
-  DIAG._iv=setInterval(()=>{ if(activeTab==='development') updateDevTab(); else { clearInterval(DIAG._iv); DIAG._iv=null; } }, 1000);
-  updateDevTab(); }
+  if(!v){ panelBody.querySelectorAll('.dvItem').forEach(it=>it.onclick=()=>dvNav(it.dataset.dv)); return; }
+  { const b=$d('dvBackBtn'); if(b) b.onclick=()=>dvNav(null,true); }
+  if(v==='cell'){
+    { const e=$d('dvCalE'); if(e) e.onclick=()=>{ if(typeof calSet==='function') calSet('empty'); updateDevTab(); }; }
+    { const f=$d('dvCalF'); if(f) f.onclick=()=>{ if(typeof calSet==='function') calSet('full'); updateDevTab(); }; }
+    { const c=$d('dvCalC'); if(c) c.onclick=()=>{ if(typeof calClear==='function') calClear(); updateDevTab(); }; }
+    { const hp=$d('dvHxProbe'); if(hp) hp.onclick=()=>{ if(podCommand('HXPROBE')) toast('Probing for the load cell… (~3 s)'); else toast('Connect the pod first'); }; }
+    { const t=$d('dvCalTare'); if(t) t.onclick=()=>{ if(podCommand('TARE')) toast('Taring — keep the cell empty and still'); else toast('Connect the pod first'); }; }
+    { const g=$d('dvCalGo'); if(g) g.onclick=()=>{ const ref=Math.round(+$d('dvCalRef').value);
+        if(!(ref>=20 && ref<=5000)){ toast('Reference must be 20–5000 g'); return; }
+        if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); else toast('Connect the pod first'); }; }
+  }
+  if(v==='power'){ const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
+    const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const val=Math.round(+$d('dvCap').value);
+      if(!(val>=100 && val<=5000)){ toast('Capacity must be 100–5000 mAh'); return; }
+      if(podCommand('BATTCAP:'+val)) toast('Capacity '+val+' mAh — saved on the pod'); else toast('Connect the pod first'); }; }
+}
 let _dvDecShown=-1, _dvSipKey='';
 function updateDevTab(){ if(activeTab!=='development') return;
   const $d=id=>document.getElementById(id); if(!$d('dvBanner')) return;
@@ -3285,6 +3351,15 @@ function updateDevTab(){ if(activeTab!=='development') return;
   else if(!fresh){ btxt='Requesting the diagnostics stream from the pod…'; }
   else { btxt='● Diagnostics streaming · firmware v'+(DIAG.v||'5')+' · 1 Hz'; bok=true; }
   if(bn.textContent!==btxt) bn.textContent=btxt; bn.classList.toggle('ok', bok);
+  // root menu — live one-line summaries under each entry
+  set('dvm_link', POD.connected?(POD.mock?'demo pod':'connected · frame '+(POD._lastFrame?((now-POD._lastFrame)/1000).toFixed(0)+' s ago':'—')+' · up '+_dvUp(DIAG.up)):'offline');
+  set('dvm_hw', DIAG.cell==null?'—':('cell '+(DIAG.cell==='OK'?'live':DIAG.cell==='ABSENT'?'UNPLUGGED':'none')+' · IMU '+(DIAG.imu?'ok':'off')+' · haptic '+(DIAG.hap?'ok':'—')));
+  set('dvm_cell', DIAG.raw!=null&&DIAG.cell!=='NONE'?('raw '+Math.round(DIAG.raw).toLocaleString()+(DIAG.scale?' · '+DIAG.scale.toFixed(1)+' c/g':'')):'no live cell');
+  set('dvm_engine', POD.connected?((POD.state||'IDLE')+' · tilt '+Math.round(POD.tiltDeg||0)+'°'+(DEVDEC.length?' · '+DEVDEC.length+' decisions':'')):'—');
+  set('dvm_log', (POD.sips||0)+' sips · '+(POD.refills||0)+' refills · '+(POD.disposes||0)+' discards');
+  set('dvm_lights', DIAG.led?((LEDMODES[DIAG.led.mode]||'?')+' @ '+DIAG.led.bright+'%'):(LED.mode+' @ '+LED.bright+'% (app)'));
+  { const pct0=POD.battery!=null?Math.round(POD.battery):null;
+    set('dvm_power', (pct0!=null?pct0+'%':'—')+(DIAG.ma?' · '+DIAG.ma.toFixed(1)+' mA est':'')); }
   // pod link
   set('dvConn', POD.connected?(POD.mock?'demo':'connected'):'offline');
   set('dvAge', POD._lastFrame?((now-POD._lastFrame)/1000).toFixed(1)+' s ago':'—');
@@ -3292,8 +3367,8 @@ function updateDevTab(){ if(activeTab!=='development') return;
   set('dvVer', DIAG.unsupported?'not available (pre-v5)':(fresh?'v'+(DIAG.v||'5'):'—'));
   set('dvHist', DIAG.hist?DIAG.hist.split('/')[0]+' synced / '+DIAG.hist.split('/')[1]+' logged':'—');
   // hardware presence
-  const hw=(id,txt,cls)=>{ const n=$d(id); if(!n) return; const v=n.querySelector('.tlv');
-    if(v && v.innerHTML!==txt) v.innerHTML=txt; n.className='teleCard'+(cls?' '+cls:''); };
+  const hw=(id,txt,cls)=>{ const n=$d(id); if(!n) return; const val=n.querySelector('.tlv');
+    if(val && val.innerHTML!==txt) val.innerHTML=txt; n.className='teleCard'+(cls?' '+cls:''); };
   if(DIAG.cell==null){ hw('dvHwCell','—'); hw('dvHwImu','—'); hw('dvHwHap','—'); hw('dvHwPins','—'); }
   else {
     hw('dvHwCell', DIAG.cell==='OK'?'● wired, live':DIAG.cell==='ABSENT'?'▲ DISCONNECTED':'✕ no chip — simulated',
@@ -3302,18 +3377,29 @@ function updateDevTab(){ if(activeTab!=='development') return;
     hw('dvHwHap', DIAG.hap?'● ok':'✕ none', DIAG.hap?'ok':'bad');
     hw('dvHwPins', DIAG.pins?'DT=D'+DIAG.pins.split('/')[0]+' · SCK=D'+DIAG.pins.split('/')[1]:'—');
   }
-  // load cell
+  // load cell + calibration test
   set('dvRaw', DIAG.raw!=null&&DIAG.cell!=='NONE'?Math.round(DIAG.raw).toLocaleString():'—');
   set('dvCellSt', DIAG.cell==null?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':'simulated');
   set('dvTare', DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—');
   set('dvFull', DIAG.tare!=null&&DIAG.scale?Math.round(DIAG.tare+DIAG.scale*HS.capacity).toLocaleString():'—');
   set('dvScale', DIAG.scale?DIAG.scale.toFixed(1):'—');
   set('dvNet', POD.connected?Math.round(POD.waterMl||0)+' ml':'—');
-  { const cs=$d('dvCalStat'); if(cs){ const e=POD.tareG, f=POD.calFullG;
+  if(DIAG.raw!=null&&DIAG.tare!=null)
+    set('dvCalS1','tare <b>'+Math.round(DIAG.tare).toLocaleString()+'</b> · raw now '+Math.round(DIAG.raw).toLocaleString()+' (Δ '+Math.round(DIAG.raw-DIAG.tare).toLocaleString()+' counts)');
+  { const cs=$d('dvCalScale'); if(cs){ let h,c;
+      if(DIAG.calRes){ h='✓ calibrated against <b>'+DIAG.calRes.g+' g</b> → <b>'+DIAG.calRes.sc+' counts/g</b> — verify in step 3'; c='calStat ok'; }
+      else if(DIAG.scale){ h='scale <b>'+DIAG.scale.toFixed(1)+' counts/g</b>'+(DIAG.scale===420?' (factory default — run the test)':' (persisted on the pod)'); c='calStat'; }
+      else { h='—'; c='calStat'; }
+      if(cs.innerHTML!==h) cs.innerHTML=h; cs.className=c; } }
+  { const ver=$d('dvCalVer');   // slow-path verify (D1 1 Hz) — the DR stream overwrites at ~7 Hz
+    if(ver && (!DIAG.lastDR || now-DIAG.lastDR>2500) && DIAG.raw!=null && DIAG.tare!=null && DIAG.scale){
+      const ri=$d('dvCalRef'), ref=ri?Math.round(+ri.value):0, gv=(DIAG.raw-DIAG.tare)/DIAG.scale;
+      ver.innerHTML=_dvVerifyText(gv, ref); } }
+  { const cs2=$d('dvCalStat'); if(cs2){ const e=POD.tareG, f=POD.calFullG;
       let h,c; if(e!=null&&f!=null){ h='✓ empty <b>'+Math.round(e)+' g</b> · full <b>'+Math.round(f)+' g</b> · span <b>'+Math.round(f-e)+' g</b> → '+HS.capacity+' ml · now <b>'+netWaterMl()+' ml</b>'; c='calStat ok'; }
       else if(e!=null){ h='◐ empty <b>'+Math.round(e)+' g</b> set · full point missing — 1 g ≈ 1 ml assumed'; c='calStat half'; }
-      else { h='not calibrated — firmware tare/scale in use'; c='calStat'; }
-      if(cs.innerHTML!==h) cs.innerHTML=h; cs.className=c; } }
+      else { h='not calibrated — pod scale in use'; c='calStat'; }
+      if(cs2.innerHTML!==h) cs2.innerHTML=h; cs2.className=c; } }
   // sip engine
   set('dvSt', POD.connected?(POD.state||'IDLE'):'—');
   set('dvTilt', POD.connected?Math.round(POD.tiltDeg||0)+'°':'—');
@@ -3328,13 +3414,13 @@ function updateDevTab(){ if(activeTab!=='development') return;
   set('dvRef', (POD.refills||0)+' · '+Math.round(POD.refillMl||0)+' ml');
   set('dvDisp', (POD.disposes||0)+' · '+Math.round(POD.disposeMl||0)+' ml');
   { const key=SIPLOG.length+':'+REFILLLOG.length+':'+DISPOSELOG.length;
-    if(key!==_dvSipKey){ _dvSipKey=key; const lg=$d('dvSipLog'); if(lg){
+    if(key!==_dvSipKey && $d('dvSipLog')){ _dvSipKey=key; const lg=$d('dvSipLog');
       const rows=[]; SIPLOG.slice(0,10).forEach(e=>rows.push({t:e.t, c:'sip', x:'+'+Math.round(e.ml)+' ml sip'+(e.dur?' · '+(e.dur/1000).toFixed(1)+' s':'')+(e.action?' · '+e.action:'')}));
       REFILLLOG.slice(0,5).forEach(e=>rows.push({t:e.t, c:'refill', x:'+'+Math.round(e.ml)+' ml refill'}));
       DISPOSELOG.slice(0,5).forEach(e=>rows.push({t:e.t, c:'dispose', x:'−'+Math.round(e.ml)+' ml discarded'+(e.unexplained?' · unexplained drop':'')}));
       rows.sort((a,b)=>+new Date(b.t)-+new Date(a.t));
       lg.innerHTML = rows.length ? rows.slice(0,14).map(r=>'<div class="dvLine '+r.c+'"><span class="dvT">'+clk(new Date(r.t))+'</span>'+r.x+'</div>').join('')
-                                 : '<div class="dvLine none">no water events yet today</div>'; } } }
+                                 : '<div class="dvLine none">no water events yet today</div>'; } }
   // lights: stored (app) vs working (pod)
   { const L=DIAG.led;
     set('dvLedApp', LED.mode+' · '+(LED.cols.map(_dvHexSw).join('')||'—')+' · '+LED.bright+'%'+(LED.saver?' · saver':''));
@@ -3357,13 +3443,20 @@ function updateDevTab(){ if(activeTab!=='development') return;
   set('dvMa', DIAG.ma!=null?DIAG.ma.toFixed(1)+' mA':'—');
   { const bars=$d('dvBars'); if(bars && DIAG.pw){
       const names=['Board','BLE radio','Load cell','IMU','LED ring','Haptic'];
-      const html=DIAG.pw.map((v,i)=>{ const w=DIAG.ma?Math.max(1.5,v/DIAG.ma*100):0;
-        return '<div class="dvBar"><span class="k">'+names[i]+'</span><span class="tr"><i style="width:'+w.toFixed(1)+'%"></i></span><b>'+v.toFixed(1)+' mA</b></div>'; }).join('');
+      const html=DIAG.pw.map((val,i)=>{ const w=DIAG.ma?Math.max(1.5,val/DIAG.ma*100):0;
+        return '<div class="dvBar"><span class="k">'+names[i]+'</span><span class="tr"><i style="width:'+w.toFixed(1)+'%"></i></span><b>'+val.toFixed(1)+' mA</b></div>'; }).join('');
       if(bars.innerHTML!==html) bars.innerHTML=html; }
     else if(bars && !DIAG.pw) bars.innerHTML='<div class="bsub">component breakdown needs the diagnostics stream</div>'; }
   if(pct!=null && DIAG.ma) set('dvLifeNow', _dvLife(DIAG.cap*(pct/100)/DIAG.ma)+' · at '+DIAG.ma.toFixed(1)+' mA'); else set('dvLifeNow','—');
   if(pct!=null && DIAG.mas) set('dvLifeSolo', _dvLife(DIAG.cap*(pct/100)/DIAG.mas)+' · at '+DIAG.mas.toFixed(1)+' mA'); else set('dvLifeSolo','—');
   { const cp=$d('dvCap'); if(cp && document.activeElement!==cp && String(cp.value)!==String(DIAG.cap)) cp.value=DIAG.cap; }
+}
+// shared verdict line for the calibration verify step (used at 7 Hz by the DR stream too)
+function _dvVerifyText(liveG, refG){
+  if(!(refG>=20)) return 'enter the reference weight in step 2';
+  if(!Number.isFinite(liveG)) return 'waiting for a live reading…';
+  const err=liveG-refG, pc=err/refG*100, good=Math.abs(pc)<=3;
+  return 'live <b>'+liveG.toFixed(1)+' g</b> · target '+refG+' g · error <b style="color:'+(good?'#46e0d2':'#ffb45a')+'">'+(err>=0?'+':'')+err.toFixed(1)+' g ('+(pc>=0?'+':'')+pc.toFixed(1)+'%)'+(good?' ✓':'')+'</b>';
 }
 // live-patch an OPEN detail sheet in place (no rebuild → no flicker) so the bottle's
 // water / activity signals move in real time while you're looking at them.
