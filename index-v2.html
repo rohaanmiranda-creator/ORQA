@@ -322,15 +322,25 @@
 
   #tabbar { position:fixed; left:0; right:0; bottom:0; z-index:8; height:calc(64px + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); display:flex;
     background:rgba(6,20,32,.55); border-top:1px solid rgba(255,255,255,.1); -webkit-backdrop-filter:blur(22px); backdrop-filter:blur(22px); }
-  #tabbar .tab { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; color:#6f93a6; font-size:9.5px; letter-spacing:.04em; cursor:pointer; }
-  #tabbar .tab svg { width:21px; height:21px; }
+  #tabbar .tab { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; color:#6f93a6; font-size:9.5px; letter-spacing:.04em; cursor:pointer; transition:color .25s; }
+  #tabbar .tab svg { width:21px; height:21px; transition:transform .25s cubic-bezier(.3,1.6,.4,1); }
   #tabbar .tab.active { color:#eafcff; }
-  #tabbar .tab.active svg { filter:drop-shadow(0 0 7px rgba(70,224,210,.7)); }
+  #tabbar .tab.active svg { filter:drop-shadow(0 0 7px rgba(70,224,210,.7)); transform:translateY(-1px); }
   #tabbar .tab { position:relative; }
+  /* the sliding highlighter — one aqua glow pill on the bar's top edge, glides to the active tab */
+  #tabGlow { position:absolute; top:-1px; left:0; width:44px; height:3px; border-radius:0 0 4px 4px;
+    background:linear-gradient(90deg, rgba(70,224,210,0), #46e0d2 30%, #46e0d2 70%, rgba(70,224,210,0));
+    box-shadow:0 0 12px rgba(70,224,210,.8), 0 3px 18px rgba(70,224,210,.35);
+    opacity:0; transition:transform .35s cubic-bezier(.3,1.4,.4,1), opacity .3s; pointer-events:none; }
+  #tabGlow.on { opacity:1; }
   #tabbar .tab .tsub { display:none; }
   #tabbar .tab.connected .tsub { display:block; line-height:1; position:absolute; bottom:2px; left:0; right:0; text-align:center; font-size:8px; letter-spacing:.07em; color:#5ff0df; text-shadow:0 0 8px rgba(70,224,210,.55); }
-  #tabbar .tab.connected svg { color:#46e0d2; animation:connGlow 2.6s ease-in-out infinite; }
-  @keyframes connGlow { 0%,100% { filter:drop-shadow(0 0 4px rgba(70,224,210,.5)); } 50% { filter:drop-shadow(0 0 11px rgba(70,224,210,.95)); } }
+  /* connection state = a small pulsing dot by the icon — it must never compete with the
+   * active highlight (the old full-icon connGlow animation overrode .active's filter) */
+  #tabbar .tab .cdot { display:none; }
+  #tabbar .tab.connected .cdot { display:block; position:absolute; top:10px; right:calc(50% - 17px); width:6px; height:6px; border-radius:50%;
+    background:#46e0d2; box-shadow:0 0 7px rgba(70,224,210,.9); animation:cdotPulse 2.6s ease-in-out infinite; }
+  @keyframes cdotPulse { 0%,100% { opacity:.55; transform:scale(.9); } 50% { opacity:1; transform:scale(1.15); } }
 
   #sheet { position:fixed; inset:0; z-index:15; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .3s; }
   #sheet.open { opacity:1; pointer-events:auto; }
@@ -928,11 +938,12 @@
     <div id="diveHint">scroll down to dive ↓</div>
 
     <div id="tabbar">
+      <i id="tabGlow"></i>
       <div class="tab active" data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0" opacity=".55"/><path d="M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0" opacity=".4"/></svg>Home</div>
       <div class="tab" data-tab="insights"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 19V11M12 19V5M19 19v-7"/></svg>Insights</div>
       <div class="tab" data-tab="coach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 16c6 1 9-2 11-8 1 4 3 6 7 6-1 4-5 6-9 6-5 0-8-2-9-4z"/></svg>Coach</div>
       <div class="tab" data-tab="community"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="10" r="2.3"/><path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M15 14c2.5 0 4.5 1.8 4.5 5" opacity=".6"/></svg>Pod</div>
-      <div class="tab" data-tab="bottle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3h4M10 3v3l-1.6 2.4A4 4 0 0 0 8 10.6V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8.4a4 4 0 0 0-.4-1.8L14 6V3"/><path d="M8 13h8" opacity=".6"/></svg>Bottle<span class="tsub">connected</span></div>
+      <div class="tab" data-tab="bottle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3h4M10 3v3l-1.6 2.4A4 4 0 0 0 8 10.6V19a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8.4a4 4 0 0 0-.4-1.8L14 6V3"/><path d="M8 13h8" opacity=".6"/></svg>Bottle<span class="tsub">connected</span><i class="cdot"></i></div>
       <div class="tab" data-tab="development"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 4v3M15 4v3M9 17v3M15 17v3M4 9h3M4 15h3M17 9h3M17 15h3"/></svg>Dev</div>
     </div>
   </div>
@@ -2208,9 +2219,19 @@ function showPanel(name){
   document.body.classList.add('panel-open'); panel.classList.add('open'); panel.scrollTop=0; }
 function hidePanel(){ document.body.classList.remove('panel-open'); panel.classList.remove('open'); }
 let devDrawerLP=false;   // set true when a Bottle-icon long-press opened the dev drawer, so the tap doesn't also switch tabs
+// the sliding tab highlighter: glide the glow pill under whichever tab is .active
+function tabGlowSync(){ const g=document.getElementById('tabGlow'); if(!g) return;
+  const t=document.querySelector('#tabbar .tab.active');
+  if(!t){ g.classList.remove('on'); return; }
+  g.classList.add('on');
+  g.style.transform='translateX('+(t.offsetLeft + t.offsetWidth/2 - 22)+'px)'; }
+addEventListener('resize', tabGlowSync);
+addEventListener('load', tabGlowSync);   // fonts/layout settle late on phones — re-sync
+requestAnimationFrame(tabGlowSync);      // initial position once layout has settled
 document.querySelectorAll('#tabbar .tab').forEach(tb=>tb.addEventListener('click',()=>{
   if(tb.dataset.tab==='bottle' && devDrawerLP){ devDrawerLP=false; return; }   // long-press = dev drawer, not a tab switch
   document.querySelectorAll('#tabbar .tab').forEach(x=>x.classList.remove('active')); tb.classList.add('active');
+  tabGlowSync();
   const n=tb.dataset.tab; activeTab=n; resetOverlays();
   if(n!=='development' && POD.cmdChar && !POD.mock && DIAG.have && !DIAG.unsupported) podCommand('DBG:0');   // stop the diag stream when leaving the Dev tab (saves pod battery)
   if(n==='home'){ hidePanel(); updateHome(); } else { showPanel(n); }
@@ -4145,7 +4166,7 @@ function setOrcaHero(on){ if(!fish || on===_orcaHeroOn) return; _orcaHeroOn=on;
   // open Insights and surface the specific card the notification refers to
   function gotoInsight(key){
     showPanel('insights');
-    try{ activeTab='insights'; document.querySelectorAll('#tabbar .tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='insights'); }); }catch(e){}
+    try{ activeTab='insights'; document.querySelectorAll('#tabbar .tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='insights'); }); tabGlowSync(); }catch(e){}
     requestAnimationFrame(function(){ setTimeout(function(){
       const pb = document.getElementById('panelBody'); if(!pb) return;
       const secByLbl = function(txt){ let f=null; pb.querySelectorAll('.insSec .lbl').forEach(function(l){ if(l.textContent.toUpperCase().indexOf(txt)>=0) f=l.closest('.insSec'); }); return f; };
