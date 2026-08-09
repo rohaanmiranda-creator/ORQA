@@ -3198,6 +3198,7 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.SFX){ const p=o.SFX.split('/'); DIAG.sipfx={ col:(p[0]||'00c83c').toLowerCase(), ms:+p[1]||400, pat:+p[2]||1, amp:+p[3]||60, on:p[4]!=='0' }; }
     if(o.RP){ const p=o.RP.split('/'); DIAG.ringPwr={ pin:+p[0], ah:p[1]==='1', on:p[2]!=='0' }; }
     if(o.RD!==undefined) DIAG.ringData=num(o.RD,8);
+    if(o.RF!==undefined) DIAG.ringFit=o.RF==='1';
   } else if(str.slice(0,3)==='D3|'){
     DIAG.batt={ lch:num(o.LCH,0), boot:num(o.BOOT,0), rr:o.RR||'?', rrx:o.RRX||'',
       vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1', cc:num(o.CC,50) };
@@ -3414,7 +3415,8 @@ function _dvSubHTML(v){
     <div class="dpBtns">
       <button class="devBtn" id="dvRpSet">✓ Enable gate</button>
       <button class="devBtn" id="dvRpOff">Disable (rail hardwired)</button>
-    </div>`;
+    </div>
+    <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Ring fitted: <b id="dvRingFit">—</b> — the data line is write-only, so tell the pod when the ring is off the bench wires and its power share drops to zero</div><span class="evJoin" id="dvRingFitBtn">toggle</span></div>`;
   if(v==='power') return head+`
     <div class="teleGrid">
       <div class="teleCard"><span class="tlk">BATTERY</span><b class="tlv" id="dvBatt">—</b></div>
@@ -3534,6 +3536,8 @@ function _dvWire(v){
         const cmd='RINGPWR:'+p+($d('dvRpAH').dataset.v==='1'?':AH':'');
         if(podCommand(cmd)) toast('Ring rail gate on D'+p+' — dark ring now de-powers'); else toast('Connect the pod first'); }; }
     { const b=$d('dvRpOff'); if(b) b.onclick=()=>{ if(podCommand('RINGPWR:OFF')) toast('Gate disabled — rail treated as hardwired'); else toast('Connect the pod first'); }; }
+    { const b=$d('dvRingFitBtn'); if(b) b.onclick=()=>{ const now=DIAG.ringFit!==false;
+        if(podCommand('RINGFIT:'+(now?0:1))) toast(now?'Ring marked NOT fitted — power model drops it':'Ring marked fitted again'); else toast('Connect the pod first'); }; }
   }
   if(v==='power'){ const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
     const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const val=Math.round(+$d('dvCap').value);
@@ -3595,10 +3599,11 @@ function updateDevTab(){ if(activeTab!=='development') return;
     hw('dvHwHap', DIAG.hap?'● ok':'✕ none', DIAG.hap?'ok':'bad');
     hw('dvHwPins', DIAG.pins?'DT=D'+DIAG.pins.split('/')[0]+' · SCK=D'+DIAG.pins.split('/')[1]:'—');
     { const R=DIAG.ringPwr, ledOn=DIAG.led&&DIAG.led.mode!==0;
-      hw('dvHwLed', 'data D'+(DIAG.ringData!=null?DIAG.ringData:'8')
+      hw('dvHwLed', DIAG.ringFit===false ? '✕ marked NOT fitted — power share zeroed'
+        : 'data D'+(DIAG.ringData!=null?DIAG.ringData:'8')
         +' · rail '+(!R?'?':R.pin>10?'hardwired, always powered':'gated D'+R.pin+' · '+(R.on?'ON':'OFF'))
         +' · light '+(ledOn?(LEDMODES[DIAG.led.mode]||'on'):'off'),
-        (R&&R.pin<=10&&!R.on)?'ok':''); }
+        DIAG.ringFit===false?'warn':(R&&R.pin<=10&&!R.on)?'ok':''); }
   }
   { const cm=$d('dvCellMsg');
     if(cm){ const bad=DIAG.cell!=null && DIAG.cell!=='OK';
@@ -3685,9 +3690,11 @@ function updateDevTab(){ if(activeTab!=='development') return;
       const mb=$d('dvLedMatch'); if(mb){ const t='Pod\'s working light config unknown — needs the diagnostics stream.';
         if(mb.textContent!==t) mb.textContent=t; mb.classList.remove('ok'); } } }
   { const R=DIAG.ringPwr;
-    set('dvRingPwr', !R ? '—'
+    set('dvRingPwr', DIAG.ringFit===false ? 'ring marked NOT FITTED — zero draw'
+      : !R ? '—'
       : R.pin>10 ? 'no gate — always powered (~10 mA idle)'
-      : 'gated on D'+R.pin+' ('+(R.ah?'active-high':'active-low')+') · rail '+(R.on?'ON':'OFF — idle draw zero')); }
+      : 'gated on D'+R.pin+' ('+(R.ah?'active-high':'active-low')+') · rail '+(R.on?'ON':'OFF — idle draw zero'));
+    set('dvRingFit', DIAG.ringFit===false?'NO — power share zeroed':(DIAG.ringFit?'yes':'—')); }
   // battery & power
   const pct=POD.battery!=null?Math.max(0,Math.min(100,Math.round(POD.battery))):null;
   set('dvBatt', (pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':''));
