@@ -3285,6 +3285,7 @@ const DVSECTIONS=[
 // hand-curated: every meaningful change to the app and the pod firmware, newest first
 const DEVCHANGELOG=[
   { d:'9 Aug · late', rows:[
+    ['fw','Board draw truly drops when idle — the 5 ms fast pace engages only while light/haptics run; a bare BLE link paces at 20 ms, and the live Board figure now reads 2.2 mA whenever that is true'],
     ['fw','Battery % no longer cliffs on unplug — the full-charge anchor glides down at the real drain rate until the voltage curve takes over'],
     ['fw','Board draw lowered — adaptive loop pacing (4× longer sleeps when idle), IMU 26 Hz + 5 Hz polling while paused-alone, BLE TX +8→+4 dBm; standalone board model 3.5→2.2 mA'],
     ['both','Per-component power draw is LIVE — computed from the actual pixels + driver states each second, not a mode average'],
