@@ -2261,8 +2261,8 @@ addEventListener('load', tabGlowSync);   // fonts/layout settle late on phones �
 requestAnimationFrame(tabGlowSync);      // initial position once layout has settled
 // ── component-testing mode: consumer tabs (Insights/Coach/Pod) are hidden until
 // re-enabled from the Dev tab. Persisted per device; Home/Bottle/Dev always stay. ──
-const DEVUI=(()=>{ try{ return Object.assign({insights:false,coach:false,pod:false,pausedSips:false}, JSON.parse(localStorage.getItem('orqaDevUI')||'{}')); }
-  catch(e){ return {insights:false,coach:false,pod:false,pausedSips:false}; } })();
+const DEVUI=(()=>{ try{ return Object.assign({insights:false,coach:false,pod:false,pausedSips:false,pwrLog:false}, JSON.parse(localStorage.getItem('orqaDevUI')||'{}')); }
+  catch(e){ return {insights:false,coach:false,pod:false,pausedSips:false,pwrLog:false}; } })();
 function applyDevUI(){
   const map={insights:'insights',coach:'coach',pod:'community'};
   for(const k in map){ const t=document.querySelector('#tabbar .tab[data-tab="'+map[k]+'"]'); if(t) t.style.display=DEVUI[k]?'':'none'; }
@@ -2277,7 +2277,7 @@ document.querySelectorAll('#tabbar .tab').forEach(tb=>tb.addEventListener('click
   document.querySelectorAll('#tabbar .tab').forEach(x=>x.classList.remove('active')); tb.classList.add('active');
   tabGlowSync();
   const n=tb.dataset.tab; activeTab=n; resetOverlays();
-  if(n!=='development' && POD.cmdChar && !POD.mock && DIAG.have && !DIAG.unsupported) podCommand('DBG:0');   // stop the diag stream when leaving the Dev tab (saves pod battery)
+  if(n!=='development' && !DEVUI.pwrLog && POD.cmdChar && !POD.mock && DIAG.have && !DIAG.unsupported) podCommand('DBG:0');   // stop the diag stream on tab leave — unless always-logging keeps the power history recording
   if(n==='home'){ hidePanel(); updateHome(); } else { showPanel(n); }
 }));
 // notification stack — pod ACTIVITY uses notify() (stays ~5 s, stacks, accent-coloured);
@@ -2573,6 +2573,8 @@ function podLive(str){
   if(o.T!==undefined) POD.deviceTime=o.T;   // device clock hh:mm:ss → live-monitor timestamp
   if(POD.connected && !POD.mock) syncTotalsFromPod(o);
   if(window.__podPlaceUI) window.__podPlaceUI();     // in/out chips track the pod's real state
+  if(DEVUI.pwrLog && POD.cmdChar && !POD.mock && !DIAG.unsupported){ const nw=Date.now();   // always-log: keep the diag stream alive from any tab
+    if(nw-DIAG.lastD>3500 && nw-DIAG._lastReq>3500){ DIAG._lastReq=nw; podCommand('DBG:1'); } }
   refreshLive(); }
 // The pod's absolute daily counters (TOT/DTOT) are the source of truth for totals:
 // a missed or duplicated SIP/DISPOSE notification shows up as a persistent offset
@@ -3196,6 +3198,7 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
       bright:num(o.LB,55), saver:o.LS==='1', ovl:num(o.OVL,0), remC:o.RL||'000000', remM:num(o.RM,0) };
     DIAG.ma=num(o.MA,DIAG.ma); DIAG.mas=num(o.MAS,DIAG.mas); DIAG.cap=num(o.CAP,DIAG.cap);
     if(o.PW) DIAG.pw=o.PW.split('/').map(Number);
+    if(DIAG.ma!=null && DIAG.pw) pwrFeed(DIAG.ma, DIAG.pw, POD.battery!=null?Math.round(POD.battery):null);   // power history sample
     if(o.SCT!==undefined) DIAG.sip={ tilt:num(o.SCT,35), min:num(o.SMN,500), max:num(o.SMX,8000), ml:num(o.SML,5), settle:num(o.SST,900) };
     if(o.SFX){ const p=o.SFX.split('/'); DIAG.sipfx={ col:(p[0]||'00c83c').toLowerCase(), ms:+p[1]||400, pat:+p[2]||1, amp:+p[3]||60, on:p[4]!=='0' }; }
     if(o.RP){ const p=o.RP.split('/'); DIAG.ringPwr={ pin:+p[0], ah:p[1]==='1', on:p[2]!=='0' }; }
@@ -3282,7 +3285,9 @@ const DVSECTIONS=[
 // hand-curated: every meaningful change to the app and the pod firmware, newest first
 const DEVCHANGELOG=[
   { d:'9 Aug · late', rows:[
-    ['fw','Eco spin light mode — one sweep, ~6 s fully dark; rail gate cuts power in the gap (LEDMODE:ECOSPIN)'],
+    ['both','Per-component power draw is LIVE — computed from the actual pixels + driver states each second, not a mode average'],
+    ['both','Power history — one sample a minute, classified 3 h / day / week / month, stored on this device; optional always-on logging from any tab'],
+    ['fw','Eco spin light mode — 1 s sweep, then 6 s fully dark; the rail gate cuts power for the WHOLE gap (LEDMODE:ECOSPIN)'],
     ['fw','Ring pixel count configurable — RINGN drives animations, power model, simulator (bench ring = 8 px)'],
     ['fw','Ring glitch fix — HX711 pin-scan no longer touches the ring data line; stray latched pixels auto-wiped'],
     ['fw','Battery gauge rebuilt — LiPo rest-voltage curve; charger-done on USB now reads 100%'],
@@ -3476,7 +3481,16 @@ function _dvSubHTML(v){
       <div class="brow" id="dvChtRow" style="display:none"><span>Est. full charge in</span><b id="dvCht">—</b></div>
     </div>
     <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>
-    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Charge current <b id="dvCc">—</b> · XIAO HICHG pin</div><span class="evJoin" id="dvCcBtn">switch</span></div>`;
+    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Charge current <b id="dvCc">—</b> · XIAO HICHG pin</div><span class="evJoin" id="dvCcBtn">switch</span></div>
+    <div class="lbl" style="margin-top:14px">POWER HISTORY · stored on this device</div>
+    <div class="bsub">one sample a minute while the diagnostics stream runs — classified by range</div>
+    <div class="chips" id="dvPwrRange">
+      <span class="chip on" data-r="3h">3 h</span><span class="chip" data-r="day">Day</span>
+      <span class="chip" data-r="week">Week</span><span class="chip" data-r="month">Month</span>
+    </div>
+    <div class="devRow" style="margin-top:6px"><span>Log outside Dev tab</span><span class="chip${DEVUI.pwrLog?' on':''}" id="dvPwrAlways">${DEVUI.pwrLog?'always logging':'only while Dev open'}</span></div>
+    <div class="teleCard" style="margin-top:8px;display:block"><span class="tlk" id="dvPwrChartLbl">TOTAL DRAW</span><canvas id="dvPwrChart" height="72" style="width:100%;display:block;margin-top:4px"></canvas></div>
+    <div id="dvPwrStats" style="margin-top:6px"></div>`;
   if(v==='report') return head+`
     <div class="bsub">everything the pod knows right now — key events, decisions, detailed battery. Long-press / drag to select, or use the buttons.</div>
     <div class="dpBtns">
@@ -3590,7 +3604,14 @@ function _dvWire(v){
       if(!(val>=100 && val<=5000)){ toast('Capacity must be 100–5000 mAh'); return; }
       if(podCommand('BATTCAP:'+val)) toast('Capacity '+val+' mAh — saved on the pod'); else toast('Connect the pod first'); };
     const cc=$d('dvCcBtn'); if(cc) cc.onclick=()=>{ const cur=(DIAG.batt&&DIAG.batt.cc)||50; const next=cur===50?100:50;
-      if(podCommand('CHGCUR:'+next)) toast('Charge current → '+next+' mA (saved on the pod)'); else toast('Connect the pod first'); }; }
+      if(podCommand('CHGCUR:'+next)) toast('Charge current → '+next+' mA (saved on the pod)'); else toast('Connect the pod first'); };
+    panelBody.querySelectorAll('#dvPwrRange .chip').forEach(c=>c.onclick=()=>{ DIAG.pwrRange=c.dataset.r;
+      panelBody.querySelectorAll('#dvPwrRange .chip').forEach(x=>x.classList.toggle('on',x===c)); _dvPwrDraw(); });
+    { const a=$d('dvPwrAlways'); if(a) a.onclick=()=>{ DEVUI.pwrLog=!DEVUI.pwrLog;
+        a.classList.toggle('on',DEVUI.pwrLog); a.textContent=DEVUI.pwrLog?'always logging':'only while Dev open';
+        try{ localStorage.setItem('orqaDevUI', JSON.stringify(DEVUI)); }catch(e){}
+        toast(DEVUI.pwrLog?'Diag stream stays on while connected — history keeps recording':'Recording only while the Dev tab is open'); }; }
+    _dvPwrDraw(); }
   if(v==='report'){
     const fill=()=>{ const p=$d('dvReport'); if(p) p.textContent=buildPodReport(); };
     fill();
@@ -3775,10 +3796,57 @@ function updateDevTab(){ if(activeTab!=='development') return;
   { const cp=$d('dvCap'); if(cp && document.activeElement!==cp && String(cp.value)!==String(DIAG.cap)) cp.value=DIAG.cap; }
   { const cc=DIAG.batt?DIAG.batt.cc:null; set('dvCc', cc?cc+' mA':'—');
     const b=$d('dvCcBtn'); if(b && cc){ const t='switch to '+(cc===50?100:50)+' mA'; if(b.textContent!==t) b.textContent=t; } }
+  if($d('dvPwrChart')) _dvPwrDraw();
 }
 function _dvWhen(e){ if(!e) return '—';   // pod epochs are LOCAL-time epochs (SETTIME pushes local)
   const d=new Date(e*1000 + new Date().getTimezoneOffset()*60000);
   return d.toLocaleDateString([], {month:'short', day:'numeric'})+' · '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+// ── power history: minute samples → hourly → daily buckets, persisted on this device ──
+const PWR=(()=>{ try{ const s=JSON.parse(localStorage.getItem('orqaPwr')||'{}');
+  return { mins:s.mins||[], hours:s.hours||[], days:s.days||[] }; }catch(e){ return {mins:[],hours:[],days:[]}; } })();
+let _pwrAcc=null;
+function pwrFeed(ma, pw, batt){ if(!Number.isFinite(ma)||!pw||pw.length<6) return;
+  const min=Math.floor(Date.now()/60000);
+  if(!_pwrAcc || _pwrAcc.min!==min){ if(_pwrAcc && _pwrAcc.n) _pwrFold(_pwrAcc); _pwrAcc={min,n:0,ma:0,pw:[0,0,0,0,0,0],batt:null}; }
+  _pwrAcc.n++; _pwrAcc.ma+=ma; for(let i=0;i<6;i++) _pwrAcc.pw[i]+=pw[i]||0; if(batt!=null) _pwrAcc.batt=batt; }
+function _pwrFold(a){
+  const e={ t:a.min*60000, ma:+(a.ma/a.n).toFixed(2), pw:a.pw.map(x=>+(x/a.n).toFixed(2)), batt:a.batt };
+  PWR.mins.push(e); while(PWR.mins.length>180) PWR.mins.shift();
+  const roll=(arr,keyName,keyVal,t,cap)=>{ let L=arr[arr.length-1];
+    if(!L || L[keyName]!==keyVal){ arr.push({[keyName]:keyVal, t, n:1, ma:e.ma, pw:e.pw.slice(), batt:e.batt}); while(arr.length>cap) arr.shift(); }
+    else { L.n++; const f=(o,v)=>+(((o*(L.n-1))+v)/L.n).toFixed(2);
+      L.ma=f(L.ma,e.ma); for(let i=0;i<6;i++) L.pw[i]=f(L.pw[i],e.pw[i]); if(e.batt!=null) L.batt=e.batt; } };
+  roll(PWR.hours, 'h', Math.floor(e.t/3600000), Math.floor(e.t/3600000)*3600000, 168);
+  const d0=new Date(e.t);
+  roll(PWR.days, 'd', d0.getFullYear()+'-'+String(d0.getMonth()+1).padStart(2,'0')+'-'+String(d0.getDate()).padStart(2,'0'), e.t, 90);
+  try{ localStorage.setItem('orqaPwr', JSON.stringify(PWR)); }catch(err){}
+}
+function _dvPwrData(){ const r=DIAG.pwrRange||'3h';
+  return r==='3h'?PWR.mins : r==='day'?PWR.hours.filter(x=>Date.now()-x.t<864e5) : r==='week'?PWR.hours : PWR.days; }
+function _dvPwrDraw(){
+  const cv=document.getElementById('dvPwrChart'); if(!cv) return;
+  const data=_dvPwrData(), st=document.getElementById('dvPwrStats'), lbl=document.getElementById('dvPwrChartLbl');
+  if(lbl){ const t='TOTAL DRAW · '+({'3h':'last 3 h · per minute',day:'last 24 h · per hour',week:'last 7 days · per hour',month:'last 90 days · per day'}[DIAG.pwrRange||'3h']);
+    if(lbl.textContent!==t) lbl.textContent=t; }
+  const w=cv.clientWidth||280; if(cv.width!==w) cv.width=w; const h=cv.height, ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  if(data.length<2){ if(st) st.innerHTML='<div class="bsub">not enough samples yet — one records each minute while the diagnostics stream runs</div>'; return; }
+  let mn=Infinity,mx=-Infinity; data.forEach(e=>{ if(e.ma<mn)mn=e.ma; if(e.ma>mx)mx=e.ma; });
+  const span=Math.max(mx-mn,1), lo=mn-span*0.1, sp=span*1.2;
+  ctx.strokeStyle='#46e0d2'; ctx.lineWidth=1.6; ctx.beginPath();
+  data.forEach((e,i)=>{ const x=i/(data.length-1)*(w-2)+1, y=h-3-((e.ma-lo)/sp)*(h-6); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  ctx.fillStyle='rgba(159,217,230,.8)'; ctx.font='9px system-ui';
+  ctx.fillText(mx.toFixed(1)+' mA',4,10); ctx.fillText(mn.toFixed(1)+' mA',4,h-4);
+  if(st){ const n=data.length, avg=k=>data.reduce((s,e)=>s+(k==null?e.ma:(e.pw[k]||0)),0)/n;
+    const names=['Board','BLE radio','Load cell','IMU','LED ring','Haptic'], tot=avg(null);
+    const bf2=data.find(e=>e.batt!=null), bl2=[...data].reverse().find(e=>e.batt!=null);
+    let html='<div class="dvBar"><span class="k"><b>Average</b></span><span class="tr"><i style="width:100%"></i></span><b>'+tot.toFixed(1)+' mA</b></div>';
+    for(let i=0;i<6;i++){ const v=avg(i);
+      html+='<div class="dvBar"><span class="k">'+names[i]+'</span><span class="tr"><i style="width:'+Math.max(1.5,v/Math.max(tot,0.1)*100).toFixed(1)+'%"></i></span><b>'+(v<0.1?v.toFixed(2):v.toFixed(1))+' mA</b></div>'; }
+    if(bf2&&bl2&&bf2!==bl2&&bf2.batt!=null&&bl2.batt!=null) html+='<div class="bsub" style="margin-top:4px">battery over this range: '+bf2.batt+'% → '+bl2.batt+'%</div>';
+    if(st.innerHTML!==html) st.innerHTML=html; }
+}
 // ── ring simulator: replays the firmware's LED modes on 14 dots (Lights page) ──
 function _dvRingSimTick(){
   const simEl=document.getElementById('dvRingSim'); if(!simEl) return;
@@ -3809,8 +3877,8 @@ function _dvRingSimTick(){
       case 4: { const step=Math.floor(now/70), head=step%N, d=(head-i+N)%N;      // spin
                 c=d<3?scale(scale(cols[Math.floor(step/N)%n],bf),1-d*0.35):0; break; }
       case 5: c=(now%900)<200?scale(cols[Math.floor(now/900)%n],bf):0; break;    // pulse
-      case 7:{ const t=now%(N*80+6000); if(t>=N*80){ c=0; break; }               // eco spin: one sweep, 6 s dark
-               const head=Math.floor(t/80)%N, d=(head-i+N)%N;
+      case 7:{ const t=now%7000; if(t>=1000){ c=0; break; }                      // eco spin: 1 s sweep, 6 s dark
+               const head=Math.floor(t*N/1000)%N, d=(head-i+N)%N;
                c=d<3?scale(scale(cols[0],bf),1-d*0.35):0; break; }
       default:{ const br=0.08+0.92*(Math.sin((now%2400)/2400*2*Math.PI-Math.PI/2)+1)/2;  // breathe
                 c=scale(cols[Math.floor(now/2400)%n],bf*br); } }
