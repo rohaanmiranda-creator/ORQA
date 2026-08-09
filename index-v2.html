@@ -2677,6 +2677,7 @@ function podCleanup(){
   clearInterval(POD._mt); POD._mt=null; clearInterval(POD._motT); POD._motT=null;
   if(POD.mock){ exitDemoMode(); return; }   // leaving demo: purge RAM demo data, restore the real persisted day
   POD.mock=false; POD._sync=null;
+  try{ DIAG.lastD=0; DIAG.lastDR=0; }catch(e){}   // diag values are now STALE — the Dev tab must show dashes, not old "live" states
   if(typeof lmAppend==='function') lmAppend('— pod disconnected —','dim'); POD.deviceTime=null;
   // if WE asked the pod to RESTART, keep the device handle so we can ride the reboot
   // straight back (Web Bluetooth lets us reconnect an already-granted device).
@@ -3339,7 +3340,11 @@ function _dvSubHTML(v){
       <button class="devBtn" id="dvCalF">② Set full</button>
       <button class="devBtn" id="dvCalC">Clear</button>
     </div>
-    <button class="devBtn" id="dvHxProbe">↻ Re-detect load cell</button>`;
+    <button class="devBtn" id="dvHxProbe">↻ Re-detect load cell</button>
+    <div class="lbl" style="margin-top:16px">CELL RESPONSE TEST · the definitive check</div>
+    <div class="bsub">an unplugged bridge can read as a quiet, stable value — indistinguishable from a real idle cell. This test settles it: press the cell plate while it watches the raw stream.</div>
+    <button class="devBtn" id="dvCellTest">🖐 Start 6-second test — then press the cell</button>
+    <div class="calStat" id="dvCellTestRes" style="display:none">—</div>`;
   if(v==='engine') return head+`
     <div class="teleGrid">
       <div class="teleCard"><span class="tlk">STATE</span><b class="tlv" id="dvSt">—</b></div>
@@ -3497,6 +3502,24 @@ function _dvWire(v){
     { const g=$d('dvCalGo'); if(g) g.onclick=()=>{ const ref=Math.round(+$d('dvCalRef').value);
         if(!(ref>=20 && ref<=5000)){ toast('Reference must be 20–5000 g'); return; }
         if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); else toast('Connect the pod first'); }; }
+    { const t=$d('dvCellTest'); if(t) t.onclick=()=>{
+        const res=$d('dvCellTestRes'); if(!res) return;
+        if(!POD.connected || Date.now()-DIAG.lastDR>3000){ res.style.display=''; res.className='calStat half';
+          res.textContent='No live raw stream — connect the pod and stay on this page (needs the amplifier detected).'; return; }
+        let lo=Infinity, hi=-Infinity; const t0=Date.now();
+        res.style.display=''; res.className='calStat';
+        t.disabled=true;
+        const iv=setInterval(()=>{
+          if(DIAG.raw!=null){ if(DIAG.raw<lo)lo=DIAG.raw; if(DIAG.raw>hi)hi=DIAG.raw; }
+          const left=6-Math.floor((Date.now()-t0)/1000);
+          if(left>0){ res.textContent='Watching the cell — PRESS THE PLATE now… '+left+' s'; return; }
+          clearInterval(iv); t.disabled=false;
+          const span=hi-lo;
+          if(!Number.isFinite(span) || span<1500){ res.className='calStat half';
+            res.innerHTML='✕ <b>No response</b> (Δ '+(Number.isFinite(span)?Math.round(span):0)+' counts). If you pressed it, the <b>bridge is not connected</b> to the amplifier — it reads a quiet open input.'; }
+          else { res.className='calStat ok';
+            res.innerHTML='✓ <b>Cell responding</b> — Δ '+Math.round(span).toLocaleString()+' counts ≈ '+(DIAG.scale?Math.round(span/DIAG.scale)+' g':'?')+'. Bridge is wired.'; }
+        }, 200); }; }
   }
   if(v==='lights'){
     { const sim=$d('dvRingSim');
@@ -3564,7 +3587,7 @@ function updateDevTab(){ if(activeTab!=='development') return;
   // hardware presence
   const hw=(id,txt,cls)=>{ const n=$d(id); if(!n) return; const val=n.querySelector('.tlv');
     if(val && val.innerHTML!==txt) val.innerHTML=txt; n.className='teleCard'+(cls?' '+cls:''); };
-  if(DIAG.cell==null){ hw('dvHwCell','—'); hw('dvHwImu','—'); hw('dvHwHap','—'); hw('dvHwPins','—'); }
+  if(DIAG.cell==null || !fresh){ hw('dvHwCell','—'); hw('dvHwImu','—'); hw('dvHwHap','—'); hw('dvHwPins','—'); hw('dvHwLed','—'); }
   else {
     hw('dvHwCell', DIAG.cell==='OK'?'● wired, live':DIAG.cell==='ABSENT'?'▲ DISCONNECTED':'✕ no chip — simulated',
        DIAG.cell==='OK'?'ok':DIAG.cell==='ABSENT'?'warn':'bad');
@@ -3585,8 +3608,8 @@ function updateDevTab(){ if(activeTab!=='development') return;
       if(bad){ DIAG.trace.length=0; const cv=$d('dvRawGraph'); if(cv){ const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); }
         set('dvRawG','—'); } } }
   // load cell + calibration test
-  set('dvRaw', DIAG.raw!=null&&DIAG.cell==='OK'?Math.round(DIAG.raw).toLocaleString():'—');
-  set('dvCellSt', DIAG.cell==null?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':'simulated');
+  set('dvRaw', fresh&&DIAG.raw!=null&&DIAG.cell==='OK'?Math.round(DIAG.raw).toLocaleString():'—');
+  set('dvCellSt', (DIAG.cell==null||!fresh)?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':'simulated');
   set('dvTare', DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—');
   set('dvFull', DIAG.tare!=null&&DIAG.scale?Math.round(DIAG.tare+DIAG.scale*HS.capacity).toLocaleString():'—');
   set('dvScale', DIAG.scale?DIAG.scale.toFixed(1):'—');
@@ -3668,9 +3691,9 @@ function updateDevTab(){ if(activeTab!=='development') return;
   // battery & power
   const pct=POD.battery!=null?Math.max(0,Math.min(100,Math.round(POD.battery))):null;
   set('dvBatt', (pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':''));
-  set('dvSrc', DIAG.cell==null?'—':DIAG.usb?(DIAG.chg?'USB — charging':(pct!=null&&pct>=97?'USB — charge complete':'USB powered')):'battery');
-  set('dvPs', DIAG.cell==null?'—':(['auto','always on','off'][DIAG.ps[0]]||'?')+(DIAG.ps[1]?' · ACTIVE':' · idle'));
-  set('dvMa', DIAG.ma!=null?DIAG.ma.toFixed(1)+' mA':'—');
+  set('dvSrc', (DIAG.cell==null||!fresh)?'—':DIAG.usb?(DIAG.chg?'USB — charging':(pct!=null&&pct>=97?'USB — charge complete':'USB powered')):'battery');
+  set('dvPs', (DIAG.cell==null||!fresh)?'—':(['auto','always on','off'][DIAG.ps[0]]||'?')+(DIAG.ps[1]?' · ACTIVE':' · idle'));
+  set('dvMa', (DIAG.ma!=null&&fresh)?DIAG.ma.toFixed(1)+' mA':'—');
   { const bars=$d('dvBars'); if(bars && DIAG.pw){
       const names=['Board','BLE radio','Load cell','IMU','LED ring','Haptic'];
       if(DIAG.led&&DIAG.led.mode===0) names[4]='LED ring · idle';         // light OFF: what's left is rail quiescent
