@@ -2256,8 +2256,8 @@ addEventListener('load', tabGlowSync);   // fonts/layout settle late on phones �
 requestAnimationFrame(tabGlowSync);      // initial position once layout has settled
 // ── component-testing mode: consumer tabs (Insights/Coach/Pod) are hidden until
 // re-enabled from the Dev tab. Persisted per device; Home/Bottle/Dev always stay. ──
-const DEVUI=(()=>{ try{ return Object.assign({insights:false,coach:false,pod:false}, JSON.parse(localStorage.getItem('orqaDevUI')||'{}')); }
-  catch(e){ return {insights:false,coach:false,pod:false}; } })();
+const DEVUI=(()=>{ try{ return Object.assign({insights:false,coach:false,pod:false,pausedSips:false}, JSON.parse(localStorage.getItem('orqaDevUI')||'{}')); }
+  catch(e){ return {insights:false,coach:false,pod:false,pausedSips:false}; } })();
 function applyDevUI(){
   const map={insights:'insights',coach:'coach',pod:'community'};
   for(const k in map){ const t=document.querySelector('#tabbar .tab[data-tab="'+map[k]+'"]'); if(t) t.style.display=DEVUI[k]?'':'none'; }
@@ -2592,7 +2592,12 @@ function syncTotalsFromPod(o){ if(o.TOT===undefined) return;
   saveState(); updateHome(); refreshHomeStats();
   console.info('[sync] totals corrected from pod counters', {offI, offW}); }
 // charSip — one confirmed DRINK (v8 uses ML:, v7 used G:)
-function podSip(str){ const o=_kv(str); if(o.VOL!==undefined) POD.waterMl=num(o.VOL,POD.waterMl);   // NaN-safe: VOL:0 (emptied) must land; garbled VOL keeps last good
+function podSip(str){ const o=_kv(str);
+  if(POD.state==='OUT' && !DEVUI.pausedSips){   // paused pod ⇒ sips don't count (Dev → Sip engine has the override for bench tests)
+    DEVDEC.unshift({ t:new Date(), cls:'none', text:'SIP frame dropped — pod is paused (out of the bottle). Enable “Sips while paused” in Dev → Sip engine to accept these on the bench.' });
+    if(DEVDEC.length>80) DEVDEC.pop(); _devDecV++;
+    liveEvent('  ⊘ SIP dropped — pod paused', ''); updateDevTab(); return; }
+  if(o.VOL!==undefined) POD.waterMl=num(o.VOL,POD.waterMl);   // NaN-safe: VOL:0 (emptied) must land; garbled VOL keeps last good
   const n=o.N!==undefined?+o.N:null;
   if(Number.isFinite(n)){
     if(POD._lastSipSeq!=null && n===POD._lastSipSeq){ console.warn('[pod] duplicate SIP #'+n+' dropped'); return; }
@@ -3077,6 +3082,7 @@ function refreshLive(){ commitWater(); checkUnexplained(); classifyAction(); wat
 // the ledger always balances — the ORQA way is no unaccounted water.
 function checkUnexplained(){
   if(!POD.connected) return;
+  if(POD.state==='OUT'){ POD._unexBase=null; return; }   // paused: held weight is not a leak
   const ml=Math.round(POD.waterMl||0);                       // firmware VOL (already debounced by the pod) — avoids the app display-stabilizer's settle lag that could double-count a real sip
   if(POD._unexBase==null){ POD._unexBase=ml; return; }
   if(ml>=POD._unexBase-2){ POD._unexBase=ml; return; }       // rose or steady → re-base (nothing unaccounted)
@@ -3332,7 +3338,9 @@ function _dvSubHTML(v){
       <div class="teleCard sm"><span class="tlk">ACCEL x·y·z</span><b class="tlv" id="dvAcc">—</b></div>
     </div>
     <div class="lbl" style="margin-top:14px">SIP SETTINGS · saved on the pod</div>
-    <div class="bsub">when a tilt registers as a sip — tune, then apply</div>
+    <div class="devRow"><span>Sips while paused</span><span class="chip${DEVUI.pausedSips?' on':''}" id="dvPausedSips">${DEVUI.pausedSips?'accepted':'blocked'}</span></div>
+    <div class="bsub">a paused pod (out of the bottle) normally counts nothing — accept its sip frames only for bench tests</div>
+    <div class="bsub" style="margin-top:8px">when a tilt registers as a sip — tune, then apply</div>
     <div class="devRow"><span>Arm tilt</span><input type="range" id="dvScTilt" min="10" max="80" step="1" value="35"><span class="val" id="dvScTiltV">35°</span></div>
     <div class="devRow"><span>Min time</span><input type="range" id="dvScMin" min="100" max="3000" step="50" value="500"><span class="val" id="dvScMinV">0.5s</span></div>
     <div class="devRow"><span>Max time</span><input type="range" id="dvScMax" min="2000" max="20000" step="500" value="8000"><span class="val" id="dvScMaxV">8s</span></div>
@@ -3390,6 +3398,7 @@ function _dvSubHTML(v){
     </div>
     <div class="bsub" style="margin-top:8px">Where the power goes — datasheet model, not measured</div>
     <div id="dvBars"></div>
+    <div class="bsub" style="margin-top:6px">⚠ the LED ring draws ~10 mA even when OFF — WS2812 quiescent current on an always-on rail. Firmware can't remove it; the V1 board gates the ring's rail with a MOSFET.</div>
     <div class="bstats" style="margin-top:8px">
       <div class="brow"><span>Est. life · learned from usage</span><b id="dvLifeLearn">—</b></div>
       <div class="brow"><span>Est. life · model, connected like now</span><b id="dvLifeNow">—</b></div>
@@ -3441,7 +3450,13 @@ function _dvWire(v){
         const cmd=on?('SIPFX:'+$d('dvFxCol').value.slice(1)+':'+$d('dvFxMs').value+':'+$d('dvFxPat').value+':'+$d('dvFxAmp').value):'SIPFX:OFF';
         if(podCommand(cmd)){ DIAG._fxTouched=false; toast(on?'Sip effects applied — the pod previews them now':'Sip feedback off'); }
         else toast('Connect the pod first'); }; }
-    { const t=$d('dvFxTest'); if(t) t.onclick=()=>{ if(podCommand('SIMSIP:30')) toast('Simulated 30 ml sip — watch the pod + logs'); else toast('Connect the pod first'); }; }
+    { const t=$d('dvFxTest'); if(t) t.onclick=()=>{
+        if(POD.state==='OUT' && !DEVUI.pausedSips){ toast('Pod is paused — flip “Sips while paused” on, or set it In the bottle'); return; }
+        if(podCommand('SIMSIP:30')) toast('Simulated 30 ml sip — watch the pod + logs'); else toast('Connect the pod first'); }; }
+    { const ps=$d('dvPausedSips'); if(ps) ps.onclick=()=>{ DEVUI.pausedSips=!DEVUI.pausedSips;
+        ps.classList.toggle('on', DEVUI.pausedSips); ps.textContent=DEVUI.pausedSips?'accepted':'blocked';
+        try{ localStorage.setItem('orqaDevUI', JSON.stringify(DEVUI)); }catch(e){}
+        toast(DEVUI.pausedSips?'Paused-pod sips will be accepted (bench mode)':'Paused-pod sips blocked again'); }; }
   }
   if(v==='cell'){
     { const e=$d('dvCalE'); if(e) e.onclick=()=>{ if(typeof calSet==='function') calSet('empty'); updateDevTab(); }; }
