@@ -2254,6 +2254,19 @@ function tabGlowSync(){ const g=document.getElementById('tabGlow'); if(!g) retur
 addEventListener('resize', tabGlowSync);
 addEventListener('load', tabGlowSync);   // fonts/layout settle late on phones — re-sync
 requestAnimationFrame(tabGlowSync);      // initial position once layout has settled
+// ── component-testing mode: consumer tabs (Insights/Coach/Pod) are hidden until
+// re-enabled from the Dev tab. Persisted per device; Home/Bottle/Dev always stay. ──
+const DEVUI=(()=>{ try{ return Object.assign({insights:false,coach:false,pod:false}, JSON.parse(localStorage.getItem('orqaDevUI')||'{}')); }
+  catch(e){ return {insights:false,coach:false,pod:false}; } })();
+function applyDevUI(){
+  const map={insights:'insights',coach:'coach',pod:'community'};
+  for(const k in map){ const t=document.querySelector('#tabbar .tab[data-tab="'+map[k]+'"]'); if(t) t.style.display=DEVUI[k]?'':'none'; }
+  const act=document.querySelector('#tabbar .tab.active');
+  if(act && act.style.display==='none'){ const home=document.querySelector('#tabbar .tab[data-tab="home"]'); if(home) home.click(); }
+  tabGlowSync();
+  try{ localStorage.setItem('orqaDevUI', JSON.stringify(DEVUI)); }catch(e){}
+}
+applyDevUI();   // synchronous — the testing-mode nav must be right from the first paint
 document.querySelectorAll('#tabbar .tab').forEach(tb=>tb.addEventListener('click',()=>{
   if(tb.dataset.tab==='bottle' && devDrawerLP){ devDrawerLP=false; return; }   // long-press = dev drawer, not a tab switch
   document.querySelectorAll('#tabbar .tab').forEach(x=>x.classList.remove('active')); tb.classList.add('active');
@@ -2537,7 +2550,7 @@ window.__fxEngine={ FX, fxSetMaster, celebrateMilestone, celebrateStreak, fxSip,
 // charLive — the periodic telemetry snapshot
 function podLive(str){
   if(str && str.slice(0,3)==='DR|'){ podDiagRaw(str); return; }                            // v5 fast raw load-cell stream (~7 Hz, Dev tab)
-  if(str && (str.slice(0,3)==='D1|' || str.slice(0,3)==='D2|')){ podDiag(str); return; }   // v5 diagnostic frames share the live characteristic
+  if(str && (str.slice(0,3)==='D1|' || str.slice(0,3)==='D2|' || str.slice(0,3)==='D3|')){ podDiag(str); return; }   // v5/v6 diagnostic frames share the live characteristic
   if(!str || str.indexOf("|T:")<0 || str.length<40){ return; }
   const o=_kv(str);
   POD._lastFrame=Date.now();
@@ -2731,6 +2744,9 @@ async function setupPodConnection(dev){
   if(!POD.evtOk) toast('Pod event channel missing — ACKs & offline history won’t arrive; reconnect the pod');
   try{ POD.cmdChar=await s.getCharacteristic(BLE_CMD); }catch(e){ POD.cmdChar=null; }
   POD.device=dev;
+  // bind this pod to the signed-in account (admin during dev): getDevices() can then
+  // silently reconnect it on every app open — no chooser, no tap
+  if(dev.id && (HS.podId!==dev.id || HS.podName!==(dev.name||''))){ HS.podId=dev.id; HS.podName=dev.name||''; saveState(); }
   if(!dev._orqaHooked){ dev._orqaHooked=true; dev.addEventListener('gattserverdisconnected', ()=>{ podCleanup(); podAutoReconnect(dev); }); }   // drop handler + self-healing reconnect
   if(POD.mock) exitDemoMode();   // a real pod arriving mid-demo: purge demo data BEFORE anchoring totals to it
   POD.connected=true; POD.mock=false; POD._userDx=false; setDemoBadge(false); POD._sync=null;   // fresh counter-sync anchor on every (re)connect
@@ -2787,6 +2803,36 @@ function tryReconnect(){
   _reconnTimer=setTimeout(attempt, 3500);   // give it a moment to reboot before the first try
 }
 window.__reconnectPod=tryReconnect;
+// ── cold-start auto-connect: reopening the app finds the bound pod by itself ──
+// Chrome's persistent Web Bluetooth permissions (getDevices) return every pod this
+// origin was ever granted; we pick the one bound to the account and connect without
+// a chooser. First-ever pairing still needs the Add-my-ORQA tap (browser rule).
+async function autoConnectPod(){
+  if(POD.connected || POD._connecting || !navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+  let devs=[]; try{ devs=await navigator.bluetooth.getDevices(); }catch(e){ return; }
+  const dev=(HS.podId && devs.find(d=>d.id===HS.podId))
+          || devs.find(d=>/orqa|hydrationpod/i.test(d.name||''));
+  if(!dev) return;
+  const attempt=async()=>{
+    if(POD.connected || POD._connecting) return true;
+    POD._connecting=true;
+    try{ await _withTimeout(dev.gatt.connect(), 8000, 'autoconnect');
+      await setupPodConnection(dev);
+      notify('● '+(dev.name||'Pod')+' connected automatically', '#46e0d2');
+      return true; }
+    catch(e){ console.warn('[pod] autoconnect attempt failed', e);
+      try{ if(dev.gatt && dev.gatt.connected) dev.gatt.disconnect(); }catch(_){}
+      return false; }
+    finally{ POD._connecting=false; } };
+  if(await attempt()) return;
+  // pod not in range / not advertising yet — arm a 45 s advertisement watch and retry on sight
+  try{ if(dev.watchAdvertisements){
+    const ac=new AbortController(); const bail=setTimeout(()=>{ try{ ac.abort(); }catch(_){} }, 45000);
+    dev.addEventListener('advertisementreceived', async()=>{ clearTimeout(bail); try{ ac.abort(); }catch(_){} await attempt(); }, {once:true});
+    await dev.watchAdvertisements({signal:ac.signal});
+  } }catch(e){}
+}
+window.__autoConnectPod=autoConnectPod;
 function startMockPod(){ POD.connected=true; POD.mock=true; setDemoBadge(true); seedDemoHistory();   // demo data lives in RAM only — saveState() refuses to persist while POD.mock
   POD.waterMl=465; POD.battery=POD.battery??78; POD.voltage=lipoVolts(POD.battery); const cc=document.querySelector('#bottleChip .conn'); if(cc) cc.style.background='#46e0d2';
   clearInterval(POD._mt); POD._mt=setInterval(()=>{ if(document.hidden) return;
@@ -3133,11 +3179,16 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.PS) DIAG.ps=o.PS.split('/').map(Number);
     DIAG.usb=o.USB==='1'; DIAG.chg=o.CHG==='1'; DIAG.bot=o.BOT!=='0'; DIAG.up=num(o.UP,DIAG.up);
     if(o.HS) DIAG.hist=o.HS; if(o.VER) DIAG.v=o.VER;
-  } else {
+  } else if(str.slice(0,3)==='D2|'){
     DIAG.led={ mode:num(o.LED,0), n:num(o.LN,1), cols:(o.LC||'').split('-').filter(Boolean),
       bright:num(o.LB,55), saver:o.LS==='1', ovl:num(o.OVL,0), remC:o.RL||'000000', remM:num(o.RM,0) };
     DIAG.ma=num(o.MA,DIAG.ma); DIAG.mas=num(o.MAS,DIAG.mas); DIAG.cap=num(o.CAP,DIAG.cap);
     if(o.PW) DIAG.pw=o.PW.split('/').map(Number);
+    if(o.SCT!==undefined) DIAG.sip={ tilt:num(o.SCT,35), min:num(o.SMN,500), max:num(o.SMX,8000), ml:num(o.SML,5), settle:num(o.SST,900) };
+    if(o.SFX){ const p=o.SFX.split('/'); DIAG.sipfx={ col:(p[0]||'00c83c').toLowerCase(), ms:+p[1]||400, pat:+p[2]||1, amp:+p[3]||60, on:p[4]!=='0' }; }
+  } else if(str.slice(0,3)==='D3|'){
+    DIAG.batt={ lch:num(o.LCH,0), boot:num(o.BOOT,0), rr:o.RR||'?', rrx:o.RRX||'',
+      vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1' };
   }
   updateDevTab(); }
 // DR| fast raw stream — update just the raw readout + trace, not the whole panel
@@ -3182,11 +3233,12 @@ function devDecide(verdict, o){
   else if(verdict==='REFILL'){ cls='refill';
     text='Weight rose '+s(Number.isFinite(d)?-d:NaN,' ml')+' after settling ('+s(pre)+'→'+s(post)+' ml) → REFILL'; }
   else {
-    text = why==='SHORT'   ? 'Tilt to '+s(peak,'°')+' lasted only '+secs+' (< 0.5 s minimum) → ignored, too quick to be a sip'
-         : why==='LONG'    ? 'Tilted for '+secs+' (> 8 s maximum) → ignored, not a drinking gesture'
+    const thMin=(DIAG.sip?DIAG.sip.min:500)/1000, thMax=(DIAG.sip?DIAG.sip.max:8000)/1000, thMl=DIAG.sip?DIAG.sip.ml:5;
+    text = why==='SHORT'   ? 'Tilt to '+s(peak,'°')+' lasted only '+secs+' (< '+thMin+' s minimum) → ignored, too quick to be a sip'
+         : why==='LONG'    ? 'Tilted for '+secs+' (> '+thMax+' s maximum) → ignored, not a drinking gesture'
          : why==='TIMEOUT' ? 'Held tilted '+secs+' without coming upright → gesture abandoned'
          : why==='HUGE'    ? 'Weight jumped '+s(d,' ml')+' — implausible for one gesture → ignored'
-         : 'Weight change '+s(d,' ml')+' is inside the ±5 ml noise band → ignored'; }
+         : 'Weight change '+s(d,' ml')+' is inside the ±'+thMl+' ml noise band → ignored'; }
   DEVDEC.unshift({ t:new Date(), cls, text }); if(DEVDEC.length>80) DEVDEC.pop(); _devDecV++;
   liveEvent('  ⚖ '+(verdict==='NONE'?'IGNORED':verdict)+' — '+text, cls==='sip'?'sip':cls==='dispose'?'dispose':cls==='refill'?'add':'');
   updateDevTab(); }
@@ -3204,8 +3256,7 @@ const DVSECTIONS=[
   { k:'link',   ic:'🛰', t:'Pod link',                s:'connection · frames · uptime' },
   { k:'hw',     ic:'🧩', t:'Hardware presence',       s:'what is really wired in' },
   { k:'cell',   ic:'⚖️', t:'Load cell · calibration', s:'raw counts · live trace · cal test' },
-  { k:'engine', ic:'🥤', t:'Sip engine · decisions',  s:'why each gesture counted or not' },
-  { k:'log',    ic:'📜', t:'Raw sip log',             s:'today’s sips, refills, discards' },
+  { k:'engine', ic:'🥤', t:'Sip engine',              s:'settings · effects · decisions · raw log' },
   { k:'lights', ic:'💡', t:'Lights',                  s:'stored vs working RGB config' },
   { k:'power',  ic:'🔋', t:'Battery & power',         s:'per-component draw · est. life' } ];
 function dvNav(k, pop){ DIAG.view=k||null; _dvRender(pop?'pop':(k?'push':null)); }
@@ -3219,6 +3270,13 @@ function _dvRender(anim){
 function _dvRootHTML(){
   return `<div class="insLede">Raw pod internals — <b>everything the firmware knows</b>, live.</div>
   <div id="dvBanner" class="dvBanner">—</div>
+  <div class="lbl" style="margin:8px 0 2px">APP MENU · TESTING MODE</div>
+  <div class="bsub">consumer tabs are parked during component testing — flip any back on here</div>
+  <div class="chips" id="dvTabRow">
+    <span class="chip" data-t="insights">Insights</span>
+    <span class="chip" data-t="coach">Coach</span>
+    <span class="chip" data-t="pod">Pod</span>
+  </div>
   <div class="dvMenu">`+DVSECTIONS.map(x=>
     `<div class="dvItem" data-dv="${x.k}"><span class="ic">${x.ic}</span><span class="tx"><span class="tt">${x.t}</span><span class="ts" id="dvm_${x.k}">${x.s}</span></span><span class="ch">›</span></div>`).join('')+`</div>`; }
 function _dvSubHTML(v){
@@ -3273,18 +3331,41 @@ function _dvSubHTML(v){
       <div class="teleCard"><span class="tlk">STABLE</span><b class="tlv" id="dvStb">—</b></div>
       <div class="teleCard sm"><span class="tlk">ACCEL x·y·z</span><b class="tlv" id="dvAcc">—</b></div>
     </div>
-    <div class="bsub" style="margin-top:8px">Decision rules — fixed in firmware</div>
+    <div class="lbl" style="margin-top:14px">SIP SETTINGS · saved on the pod</div>
+    <div class="bsub">when a tilt registers as a sip — tune, then apply</div>
+    <div class="devRow"><span>Arm tilt</span><input type="range" id="dvScTilt" min="10" max="80" step="1" value="35"><span class="val" id="dvScTiltV">35°</span></div>
+    <div class="devRow"><span>Min time</span><input type="range" id="dvScMin" min="100" max="3000" step="50" value="500"><span class="val" id="dvScMinV">0.5s</span></div>
+    <div class="devRow"><span>Max time</span><input type="range" id="dvScMax" min="2000" max="20000" step="500" value="8000"><span class="val" id="dvScMaxV">8s</span></div>
+    <div class="devRow"><span>Min sip</span><input type="range" id="dvScMl" min="1" max="50" step="1" value="5"><span class="val" id="dvScMlV">5ml</span></div>
+    <div class="devRow"><span>Settle</span><input type="range" id="dvScSettle" min="300" max="3000" step="100" value="900"><span class="val" id="dvScSettleV">0.9s</span></div>
+    <div class="dpBtns">
+      <button class="devBtn" id="dvScApply">✓ Apply to pod</button>
+      <button class="devBtn" id="dvScReset">↺ Reset defaults</button>
+    </div>
+    <div class="lbl" style="margin-top:14px">EFFECTS WHEN A SIP REGISTERS · on the pod</div>
+    <div class="bsub">phone-side effects (glow · sound · vibration) stay in the DJ console masters</div>
+    <div class="devRow"><span>Feedback</span><span class="chip on" id="dvFxOn" data-v="1">enabled</span></div>
+    <div class="devRow"><span>Flash</span><input type="color" id="dvFxCol" value="#00c83c"><input type="range" id="dvFxMs" min="100" max="2000" step="50" value="400" style="flex:1"><span class="val" id="dvFxMsV">0.4s</span></div>
+    <div class="devRow"><span>Haptic</span><select class="devSel" id="dvFxPat">
+      <option value="0">Single</option><option value="1" selected>Double</option><option value="2">Triple</option>
+      <option value="3">Long</option><option value="4">Heartbeat</option><option value="5">Ramp</option>
+      <option value="6">Knock</option><option value="7">Train</option><option value="8">Escalate</option><option value="9">Purr</option></select>
+      <input type="range" id="dvFxAmp" min="1" max="100" value="60" style="flex:1"><span class="val" id="dvFxAmpV">60%</span></div>
+    <div class="dpBtns">
+      <button class="devBtn" id="dvFxApply">✓ Apply effects</button>
+      <button class="devBtn" id="dvFxTest">💧 Test sip on the pod</button>
+    </div>
+    <div class="lbl" style="margin-top:14px">LIVE RULES ON THE POD</div>
     <table class="dvTbl">
-      <tr><td>Gesture arms at</td><td>tilt &gt; 35°</td></tr>
-      <tr><td>Back upright below</td><td>20°</td></tr>
-      <tr><td>Counts as a SIP</td><td>0.5–8 s tilted · weight −5…−400 ml</td></tr>
+      <tr><td>Gesture arms at</td><td id="dvRuleArm">tilt &gt; 35°</td></tr>
+      <tr><td>Counts as a SIP</td><td id="dvRuleSip">0.5–8 s tilted · ≥5 ml drop</td></tr>
       <tr><td>Counts as DISCARDED</td><td>peak tilt ≥ 150° — upside-down pour</td></tr>
       <tr><td>Counts as a REFILL</td><td>weight +20 ml or more</td></tr>
-      <tr><td>Ignored as noise</td><td>±5 ml · &gt;400 ml · &lt;0.5 s tilts</td></tr>
+      <tr><td>Settle before weighing</td><td id="dvRuleSettle">0.9 s</td></tr>
     </table>
     <div class="bsub" style="margin-top:10px">Decision log — every gesture the pod evaluated, and why</div>
-    <div class="dvLog" id="dvDecLog"></div>`;
-  if(v==='log') return head+`
+    <div class="dvLog" id="dvDecLog"></div>
+    <div class="lbl" style="margin-top:14px">RAW SIP LOG · TODAY</div>
     <div class="bstats">
       <div class="brow"><span>Sips today</span><b id="dvSips">—</b></div>
       <div class="brow"><span>Refills today</span><b id="dvRef">—</b></div>
@@ -3310,15 +3391,58 @@ function _dvSubHTML(v){
     <div class="bsub" style="margin-top:8px">Where the power goes — datasheet model, not measured</div>
     <div id="dvBars"></div>
     <div class="bstats" style="margin-top:8px">
-      <div class="brow"><span>Est. life · connected like now</span><b id="dvLifeNow">—</b></div>
-      <div class="brow"><span>Est. life · standalone, app closed</span><b id="dvLifeSolo">—</b></div>
+      <div class="brow"><span>Est. life · learned from usage</span><b id="dvLifeLearn">—</b></div>
+      <div class="brow"><span>Est. life · model, connected like now</span><b id="dvLifeNow">—</b></div>
+      <div class="brow"><span>Est. life · model, standalone</span><b id="dvLifeSolo">—</b></div>
+    </div>
+    <div class="lbl" style="margin-top:14px">BATTERY HISTORY · saved on the pod</div>
+    <div class="bstats">
+      <div class="brow"><span>Last charged</span><b id="dvLastChg">—</b></div>
+      <div class="brow"><span>Last reboot</span><b id="dvBoot">—</b></div>
+      <div class="brow"><span>Reboot reason</span><b id="dvRr">—</b></div>
+      <div class="brow"><span>Voltage stable for use</span><b id="dvVst">—</b></div>
+      <div class="brow" id="dvChtRow" style="display:none"><span>Est. full charge in</span><b id="dvCht">—</b></div>
     </div>
     <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>`;
   return head; }
 function _dvWire(v){
   const $d=id=>document.getElementById(id);
-  if(!v){ panelBody.querySelectorAll('.dvItem').forEach(it=>it.onclick=()=>dvNav(it.dataset.dv)); return; }
+  if(!v){ panelBody.querySelectorAll('.dvItem').forEach(it=>it.onclick=()=>dvNav(it.dataset.dv));
+    panelBody.querySelectorAll('#dvTabRow .chip').forEach(c=>{ c.classList.toggle('on', !!DEVUI[c.dataset.t]);
+      c.onclick=()=>{ DEVUI[c.dataset.t]=!DEVUI[c.dataset.t]; c.classList.toggle('on', DEVUI[c.dataset.t]);
+        applyDevUI(); toast(c.textContent+' tab '+(DEVUI[c.dataset.t]?'shown':'hidden')); }; });
+    return; }
   { const b=$d('dvBackBtn'); if(b) b.onclick=()=>dvNav(null,true); }
+  if(v==='engine'){
+    const lbl=()=>{ const g=id=>$d(id); if(!g('dvScTilt')) return;
+      g('dvScTiltV').textContent=g('dvScTilt').value+'°';
+      g('dvScMinV').textContent=parseFloat((g('dvScMin').value/1000).toFixed(2))+'s';
+      g('dvScMaxV').textContent=parseFloat((g('dvScMax').value/1000).toFixed(1))+'s';
+      g('dvScMlV').textContent=g('dvScMl').value+'ml';
+      g('dvScSettleV').textContent=parseFloat((g('dvScSettle').value/1000).toFixed(1))+'s'; };
+    ['dvScTilt','dvScMin','dvScMax','dvScMl','dvScSettle'].forEach(id=>{ const el=$d(id); if(el) el.oninput=()=>{ DIAG._sipTouched=true; lbl(); }; });
+    { const a=$d('dvScApply'); if(a) a.onclick=()=>{
+        const t=+$d('dvScTilt').value, mn=+$d('dvScMin').value, mx=+$d('dvScMax').value, ml=+$d('dvScMl').value, st=+$d('dvScSettle').value;
+        if(mx<=mn){ toast('Max time must be above min time'); return; }
+        if(podCommand('SIPCFG:'+t+':'+mn+':'+mx+':'+ml+':'+st)){ DIAG._sipTouched=false; toast('Sip rules sent — saved on the pod'); }
+        else toast('Connect the pod first'); }; }
+    { const r=$d('dvScReset'); if(r) r.onclick=()=>{
+        if(podCommand('SIPCFG:RESET')){ DIAG._sipTouched=false; toast('Sip rules reset to firmware defaults'); }
+        else toast('Connect the pod first'); }; }
+    const fxLbl=()=>{ const g=id=>$d(id); if(!g('dvFxMs')) return;
+      g('dvFxMsV').textContent=parseFloat((g('dvFxMs').value/1000).toFixed(2))+'s';
+      g('dvFxAmpV').textContent=g('dvFxAmp').value+'%'; };
+    ['dvFxMs','dvFxAmp'].forEach(id=>{ const el=$d(id); if(el) el.oninput=()=>{ DIAG._fxTouched=true; fxLbl(); }; });
+    { const c=$d('dvFxCol'); if(c) c.oninput=()=>{ DIAG._fxTouched=true; }; }
+    { const p=$d('dvFxPat'); if(p) p.onchange=()=>{ DIAG._fxTouched=true; }; }
+    { const o=$d('dvFxOn'); if(o) o.onclick=()=>{ const on=o.dataset.v!=='1'; o.dataset.v=on?'1':'0';
+        o.textContent=on?'enabled':'disabled'; o.classList.toggle('on',on); DIAG._fxTouched=true; }; }
+    { const a=$d('dvFxApply'); if(a) a.onclick=()=>{ const on=$d('dvFxOn').dataset.v==='1';
+        const cmd=on?('SIPFX:'+$d('dvFxCol').value.slice(1)+':'+$d('dvFxMs').value+':'+$d('dvFxPat').value+':'+$d('dvFxAmp').value):'SIPFX:OFF';
+        if(podCommand(cmd)){ DIAG._fxTouched=false; toast(on?'Sip effects applied — the pod previews them now':'Sip feedback off'); }
+        else toast('Connect the pod first'); }; }
+    { const t=$d('dvFxTest'); if(t) t.onclick=()=>{ if(podCommand('SIMSIP:30')) toast('Simulated 30 ml sip — watch the pod + logs'); else toast('Connect the pod first'); }; }
+  }
   if(v==='cell'){
     { const e=$d('dvCalE'); if(e) e.onclick=()=>{ if(typeof calSet==='function') calSet('empty'); updateDevTab(); }; }
     { const f=$d('dvCalF'); if(f) f.onclick=()=>{ if(typeof calSet==='function') calSet('full'); updateDevTab(); }; }
@@ -3355,8 +3479,7 @@ function updateDevTab(){ if(activeTab!=='development') return;
   set('dvm_link', POD.connected?(POD.mock?'demo pod':'connected · frame '+(POD._lastFrame?((now-POD._lastFrame)/1000).toFixed(0)+' s ago':'—')+' · up '+_dvUp(DIAG.up)):'offline');
   set('dvm_hw', DIAG.cell==null?'—':('cell '+(DIAG.cell==='OK'?'live':DIAG.cell==='ABSENT'?'UNPLUGGED':'none')+' · IMU '+(DIAG.imu?'ok':'off')+' · haptic '+(DIAG.hap?'ok':'—')));
   set('dvm_cell', DIAG.raw!=null&&DIAG.cell!=='NONE'?('raw '+Math.round(DIAG.raw).toLocaleString()+(DIAG.scale?' · '+DIAG.scale.toFixed(1)+' c/g':'')):'no live cell');
-  set('dvm_engine', POD.connected?((POD.state||'IDLE')+' · tilt '+Math.round(POD.tiltDeg||0)+'°'+(DEVDEC.length?' · '+DEVDEC.length+' decisions':'')):'—');
-  set('dvm_log', (POD.sips||0)+' sips · '+(POD.refills||0)+' refills · '+(POD.disposes||0)+' discards');
+  set('dvm_engine', (POD.connected?((POD.state||'IDLE')+' · tilt '+Math.round(POD.tiltDeg||0)+'° · '):'')+(POD.sips||0)+' sips'+(DEVDEC.length?' · '+DEVDEC.length+' decisions':''));
   set('dvm_lights', DIAG.led?((LEDMODES[DIAG.led.mode]||'?')+' @ '+DIAG.led.bright+'%'):(LED.mode+' @ '+LED.bright+'% (app)'));
   { const pct0=POD.battery!=null?Math.round(POD.battery):null;
     set('dvm_power', (pct0!=null?pct0+'%':'—')+(DIAG.ma?' · '+DIAG.ma.toFixed(1)+' mA est':'')); }
@@ -3400,7 +3523,26 @@ function updateDevTab(){ if(activeTab!=='development') return;
       else if(e!=null){ h='◐ empty <b>'+Math.round(e)+' g</b> set · full point missing — 1 g ≈ 1 ml assumed'; c='calStat half'; }
       else { h='not calibrated — pod scale in use'; c='calStat'; }
       if(cs2.innerHTML!==h) cs2.innerHTML=h; cs2.className=c; } }
-  // sip engine
+  // sip engine — settings sliders track the pod's live values until the user drags
+  { const S=DIAG.sip;
+    if(S && !DIAG._sipTouched && $d('dvScTilt')){
+      const put=(id,val)=>{ const el=$d(id); if(el && document.activeElement!==el && String(el.value)!==String(val)) el.value=val; };
+      put('dvScTilt',S.tilt); put('dvScMin',S.min); put('dvScMax',S.max); put('dvScMl',S.ml); put('dvScSettle',S.settle);
+      set('dvScTiltV',S.tilt+'°'); set('dvScMinV',parseFloat((S.min/1000).toFixed(2))+'s');
+      set('dvScMaxV',parseFloat((S.max/1000).toFixed(1))+'s'); set('dvScMlV',S.ml+'ml');
+      set('dvScSettleV',parseFloat((S.settle/1000).toFixed(1))+'s'); }
+    const t=S?S.tilt:35, mn=S?S.min:500, mx=S?S.max:8000, ml=S?S.ml:5, st=S?S.settle:900;
+    set('dvRuleArm','tilt &gt; '+t+'°');
+    set('dvRuleSip',parseFloat((mn/1000).toFixed(2))+'–'+parseFloat((mx/1000).toFixed(1))+' s tilted · ≥'+ml+' ml drop');
+    set('dvRuleSettle',parseFloat((st/1000).toFixed(1))+' s'); }
+  { const F=DIAG.sipfx;
+    if(F && !DIAG._fxTouched && $d('dvFxCol')){
+      const c=$d('dvFxCol'); if(c && document.activeElement!==c && c.value.toLowerCase()!=='#'+F.col) c.value='#'+F.col;
+      const m=$d('dvFxMs'); if(m && document.activeElement!==m && String(m.value)!==String(F.ms)) m.value=F.ms;
+      const p=$d('dvFxPat'); if(p && String(p.value)!==String(F.pat)) p.value=F.pat;
+      const a=$d('dvFxAmp'); if(a && document.activeElement!==a && String(a.value)!==String(F.amp)) a.value=F.amp;
+      set('dvFxMsV',parseFloat((F.ms/1000).toFixed(2))+'s'); set('dvFxAmpV',F.amp+'%');
+      const o=$d('dvFxOn'); if(o && (o.dataset.v==='1')!==F.on){ o.dataset.v=F.on?'1':'0'; o.textContent=F.on?'enabled':'disabled'; o.classList.toggle('on',F.on); } } }
   set('dvSt', POD.connected?(POD.state||'IDLE'):'—');
   set('dvTilt', POD.connected?Math.round(POD.tiltDeg||0)+'°':'—');
   set('dvStb', POD.connected?(POD.stable?'yes':'no'):'—');
@@ -3449,8 +3591,29 @@ function updateDevTab(){ if(activeTab!=='development') return;
     else if(bars && !DIAG.pw) bars.innerHTML='<div class="bsub">component breakdown needs the diagnostics stream</div>'; }
   if(pct!=null && DIAG.ma) set('dvLifeNow', _dvLife(DIAG.cap*(pct/100)/DIAG.ma)+' · at '+DIAG.ma.toFixed(1)+' mA'); else set('dvLifeNow','—');
   if(pct!=null && DIAG.mas) set('dvLifeSolo', _dvLife(DIAG.cap*(pct/100)/DIAG.mas)+' · at '+DIAG.mas.toFixed(1)+' mA'); else set('dvLifeSolo','—');
+  // battery history — persisted on the pod, learned life preferred over the model once real data exists
+  { const B=DIAG.batt;
+    set('dvLifeLearn', (B && B.dph>0.01 && pct!=null) ? _dvLife(pct/B.dph)+' · measured '+B.dph.toFixed(2)+'%/h'
+                                                      : 'not learned yet — needs unplugged runtime');
+    set('dvLastChg', B&&B.lch?_dvWhen(B.lch):'—');
+    set('dvBoot', B&&B.boot?_dvWhen(B.boot):'—');
+    set('dvRr', B?_dvRrText(B.rr):'—');
+    set('dvVst', !B?'—':(B.vst?'✓ stable':'⚠ UNSTABLE — sagging under load')
+      +(B.vlo!=null&&B.vhi!=null&&B.vlo<90?' · '+B.vlo.toFixed(2)+'–'+B.vhi.toFixed(2)+' V':''));
+    const cr=$d('dvChtRow'); if(cr){ const show=!!(B&&B.chg&&B.cht>0); cr.style.display=show?'':'none';
+      if(show) set('dvCht', (B.cht>=60?Math.floor(B.cht/60)+'h ':'')+(B.cht%60)+'m at ~50 mA'); } }
   { const cp=$d('dvCap'); if(cp && document.activeElement!==cp && String(cp.value)!==String(DIAG.cap)) cp.value=DIAG.cap; }
 }
+function _dvWhen(e){ if(!e) return '—';   // pod epochs are LOCAL-time epochs (SETTIME pushes local)
+  const d=new Date(e*1000 + new Date().getTimezoneOffset()*60000);
+  return d.toLocaleDateString([], {month:'short', day:'numeric'})+' · '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+function _dvRrText(rr){ return rr==='PIN'      ? 'reset button / flashing'
+                             : rr==='WATCHDOG' ? 'watchdog — firmware hang'
+                             : rr==='SOFTWARE' ? 'software restart — command, rename or update'
+                             : rr==='LOCKUP'   ? 'CPU lockup fault'
+                             : rr==='WAKEOFF'  ? 'woke from power-off'
+                             : rr==='POWERON'  ? 'power-on — battery removed or fully drained'
+                             : rr||'—'; }
 // shared verdict line for the calibration verify step (used at 7 Hz by the DR stream too)
 function _dvVerifyText(liveG, refG){
   if(!(refG>=20)) return 'enter the reference weight in step 2';
@@ -3602,7 +3765,7 @@ let _stDate=new Date().toDateString();
 let _saveT=null;
 function _persistNow(){ try{
   ORQA.store.setItem(ST_KEY, JSON.stringify({ v:1, date:_stDate,
-    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit, capacity:HS.capacity },
+    hs:{ goal:HS.goal, intake:HS.intake, freed:HS.freed, donated:HS.donated, wasted:HS.wasted, streak:HS.streak, _goalHit:HS._goalHit, capacity:HS.capacity, podId:HS.podId||null, podName:HS.podName||null },
     rem:{ ...REM },
     led:{ ...LED, cols:LED.cols.slice() },
     tareG:(POD.tareG==null?null:POD.tareG), calFullG:(POD.calFullG==null?null:POD.calFullG),
@@ -3624,6 +3787,7 @@ function loadPersisted(reset){ try{
   const s=JSON.parse(ORQA.store.getItem(ST_KEY)||'null'); if(!s||s.v!==1) return;
   if(!DAYHIST.length) (s.hist||[]).forEach(h=>DAYHIST.push(h));
   const h=s.hs||{}; HS.goal=h.goal||HS.goal; if(h.capacity) HS.capacity=h.capacity;
+  if(h.podId) HS.podId=h.podId; if(h.podName) HS.podName=h.podName;   // account-bound pod for silent auto-connect
   if(s.rem) Object.assign(REM, s.rem);               // reminder config survives reloads (and day changes)
   if(s.led){ Object.assign(LED, s.led); if(!Array.isArray(LED.cols)||!LED.cols.length) LED.cols=['46e0d2']; }
   if(s.tareG!==undefined && s.tareG!==null) POD.tareG=s.tareG;   // keep the calibration across reloads
@@ -3834,7 +3998,7 @@ function exitToDash(){
   if(b.classList.contains('immersive')){
     const k=b.getAttribute('data-imk');
     const tab = k==='insights'?'insights' : k==='drorqa'?'coach' : k==='friends'?'community' : null;
-    if(tab){ const t=document.querySelector('#tabbar .tab[data-tab="'+tab+'"]'); if(t){ t.click(); return; } }
+    if(tab){ const t=document.querySelector('#tabbar .tab[data-tab="'+tab+'"]'); if(t && t.style.display!=='none'){ t.click(); return; } }
     exitImmersive(); return;                    // fallback if the kind is unknown
   }
   setDived(false);                              // the Home ocean surfaces back to Home
@@ -4259,7 +4423,7 @@ function setOrcaHero(on){ if(!fish || on===_orcaHeroOn) return; _orcaHeroOn=on;
   // open Insights and surface the specific card the notification refers to
   function gotoInsight(key){
     showPanel('insights');
-    try{ activeTab='insights'; document.querySelectorAll('#tabbar .tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='insights'); }); tabGlowSync(); }catch(e){}
+    try{ if(DEVUI.insights){ activeTab='insights'; document.querySelectorAll('#tabbar .tab').forEach(function(t){ t.classList.toggle('active', t.dataset.tab==='insights'); }); tabGlowSync(); } }catch(e){}
     requestAnimationFrame(function(){ setTimeout(function(){
       const pb = document.getElementById('panelBody'); if(!pb) return;
       const secByLbl = function(txt){ let f=null; pb.querySelectorAll('.insSec .lbl').forEach(function(l){ if(l.textContent.toUpperCase().indexOf(txt)>=0) f=l.closest('.insSec'); }); return f; };
@@ -4578,6 +4742,7 @@ ORQA.auth = (function(){
 
   function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role);
     try{ if(window.__loadAccount) window.__loadAccount(u&&u.email); }catch(e){}   // load THIS account's persisted data
+    setTimeout(()=>{ try{ if(window.__autoConnectPod) window.__autoConnectPod(); }catch(e){} }, 900);   // account loaded → silently reconnect its bound pod
   }
 
   function buildGate(){
