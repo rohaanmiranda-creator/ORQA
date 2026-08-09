@@ -3285,6 +3285,8 @@ const DVSECTIONS=[
 // hand-curated: every meaningful change to the app and the pod firmware, newest first
 const DEVCHANGELOG=[
   { d:'9 Aug · late', rows:[
+    ['fw','Battery % no longer cliffs on unplug — the full-charge anchor glides down at the real drain rate until the voltage curve takes over'],
+    ['fw','Board draw lowered — adaptive loop pacing (4× longer sleeps when idle), IMU 26 Hz + 5 Hz polling while paused-alone, BLE TX +8→+4 dBm; standalone board model 3.5→2.2 mA'],
     ['both','Per-component power draw is LIVE — computed from the actual pixels + driver states each second, not a mode average'],
     ['both','Power history — one sample a minute, classified 3 h / day / week / month, stored on this device; optional always-on logging from any tab'],
     ['fw','Eco spin light mode — 1 s sweep, then 6 s fully dark; the rail gate cuts power for the WHOLE gap (LEDMODE:ECOSPIN)'],
