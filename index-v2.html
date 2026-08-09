@@ -3192,6 +3192,7 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.PW) DIAG.pw=o.PW.split('/').map(Number);
     if(o.SCT!==undefined) DIAG.sip={ tilt:num(o.SCT,35), min:num(o.SMN,500), max:num(o.SMX,8000), ml:num(o.SML,5), settle:num(o.SST,900) };
     if(o.SFX){ const p=o.SFX.split('/'); DIAG.sipfx={ col:(p[0]||'00c83c').toLowerCase(), ms:+p[1]||400, pat:+p[2]||1, amp:+p[3]||60, on:p[4]!=='0' }; }
+    if(o.RP){ const p=o.RP.split('/'); DIAG.ringPwr={ pin:+p[0], ah:p[1]==='1', on:p[2]!=='0' }; }
   } else if(str.slice(0,3)==='D3|'){
     DIAG.batt={ lch:num(o.LCH,0), boot:num(o.BOOT,0), rr:o.RR||'?', rrx:o.RRX||'',
       vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1' };
@@ -3388,6 +3389,14 @@ function _dvSubHTML(v){
       <div class="brow"><span>Brightness · saver</span><b id="dvLedB">—</b></div>
       <div class="brow"><span>Overlay now</span><b id="dvLedOvl">—</b></div>
       <div class="brow"><span>Reminder light</span><b id="dvLedRem">—</b></div>
+      <div class="brow"><span>Ring power rail</span><b id="dvRingPwr">—</b></div>
+    </div>
+    <div class="lbl" style="margin-top:14px">RING RAIL GATE · kills the ~10 mA idle draw</div>
+    <div class="bsub">the WS2812s draw ~10 mA from their rail even showing black. Wire a MOSFET on the ring's power (V1 board has one; bench: P-FET, gate to a spare GPIO) and tell the pod which pin drives it — the firmware then cuts the rail whenever the ring is dark for 2 s.</div>
+    <div class="devRow"><span>Gate pin</span><input id="dvRpPin" class="dvCapIn" type="number" min="0" max="10" value="6"><span class="chip" id="dvRpAH" data-v="0">active-low</span></div>
+    <div class="dpBtns">
+      <button class="devBtn" id="dvRpSet">✓ Enable gate</button>
+      <button class="devBtn" id="dvRpOff">Disable (rail hardwired)</button>
     </div>`;
   if(v==='power') return head+`
     <div class="teleGrid">
@@ -3467,6 +3476,15 @@ function _dvWire(v){
     { const g=$d('dvCalGo'); if(g) g.onclick=()=>{ const ref=Math.round(+$d('dvCalRef').value);
         if(!(ref>=20 && ref<=5000)){ toast('Reference must be 20–5000 g'); return; }
         if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); else toast('Connect the pod first'); }; }
+  }
+  if(v==='lights'){
+    { const ah=$d('dvRpAH'); if(ah) ah.onclick=()=>{ const on=ah.dataset.v!=='1'; ah.dataset.v=on?'1':'0';
+        ah.textContent=on?'active-high':'active-low'; ah.classList.toggle('on',on); }; }
+    { const b=$d('dvRpSet'); if(b) b.onclick=()=>{ const p=Math.round(+$d('dvRpPin').value);
+        if(!(p>=0 && p<=10)){ toast('Pin must be D0–D10'); return; }
+        const cmd='RINGPWR:'+p+($d('dvRpAH').dataset.v==='1'?':AH':'');
+        if(podCommand(cmd)) toast('Ring rail gate on D'+p+' — dark ring now de-powers'); else toast('Connect the pod first'); }; }
+    { const b=$d('dvRpOff'); if(b) b.onclick=()=>{ if(podCommand('RINGPWR:OFF')) toast('Gate disabled — rail treated as hardwired'); else toast('Connect the pod first'); }; }
   }
   if(v==='power'){ const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
     const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const val=Math.round(+$d('dvCap').value);
@@ -3592,6 +3610,10 @@ function updateDevTab(){ if(activeTab!=='development') return;
     else { set('dvLedPod','—'); set('dvLedB','—'); set('dvLedOvl','—'); set('dvLedRem','—');
       const mb=$d('dvLedMatch'); if(mb){ const t='Pod\'s working light config unknown — needs the diagnostics stream.';
         if(mb.textContent!==t) mb.textContent=t; mb.classList.remove('ok'); } } }
+  { const R=DIAG.ringPwr;
+    set('dvRingPwr', !R ? '—'
+      : R.pin>10 ? 'no gate — always powered (~10 mA idle)'
+      : 'gated on D'+R.pin+' ('+(R.ah?'active-high':'active-low')+') · rail '+(R.on?'ON':'OFF — idle draw zero')); }
   // battery & power
   const pct=POD.battery!=null?Math.max(0,Math.min(100,Math.round(POD.battery))):null;
   set('dvBatt', (pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':''));
