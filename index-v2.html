@@ -3315,7 +3315,9 @@ function _dvSubHTML(v){
       <div class="teleCard" id="dvHwHap"><span class="tlk">HAPTIC DRIVER</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwPins"><span class="tlk">HX711 WIRING</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwLed" style="grid-column:1/-1"><span class="tlk">LED RING · write-only line, presence can't be sensed</span><b class="tlv">—</b></div>
-    </div>`;
+    </div>
+    <div class="bsub" style="margin-top:10px">Load cell master switch — completely disables it on the pod (no probing, chip in power-down, simulated volume). Persisted; Re-detect on the Load cell page turns it back on.</div>
+    <button class="devBtn" id="dvCellOffBtn">⊘ Switch load cell OFF</button>`;
   if(v==='cell') return head+`
     <div class="dvBanner" id="dvCellMsg" style="display:none">Plug in the load cell to start measurement — the amplifier is reading a floating input right now.</div>
     <div class="teleGrid">
@@ -3459,6 +3461,11 @@ function _dvWire(v){
         applyDevUI(); toast(c.textContent+' tab '+(DEVUI[c.dataset.t]?'shown':'hidden')); }; });
     return; }
   { const b=$d('dvBackBtn'); if(b) b.onclick=()=>dvNav(null,true); }
+  if(v==='hw'){
+    const b=$d('dvCellOffBtn'); if(b) b.onclick=()=>{ const off=DIAG.cell==='OFF';
+      if(podCommand('CELLOFF:'+(off?0:1))) toast(off?'Load cell re-enabled — probing…':'Load cell switched OFF — pod uses simulated volume');
+      else toast('Connect the pod first'); };
+  }
   if(v==='engine'){
     const lbl=()=>{ const g=id=>$d(id); if(!g('dvScTilt')) return;
       g('dvScTiltV').textContent=g('dvScTilt').value+'°';
@@ -3593,8 +3600,8 @@ function updateDevTab(){ if(activeTab!=='development') return;
     if(val && val.innerHTML!==txt) val.innerHTML=txt; n.className='teleCard'+(cls?' '+cls:''); };
   if(DIAG.cell==null || !fresh){ hw('dvHwCell','—'); hw('dvHwImu','—'); hw('dvHwHap','—'); hw('dvHwPins','—'); hw('dvHwLed','—'); }
   else {
-    hw('dvHwCell', DIAG.cell==='OK'?'● wired, live':DIAG.cell==='ABSENT'?'▲ DISCONNECTED':'✕ no chip — simulated',
-       DIAG.cell==='OK'?'ok':DIAG.cell==='ABSENT'?'warn':'bad');
+    hw('dvHwCell', DIAG.cell==='OK'?'● wired, live':DIAG.cell==='ABSENT'?'▲ DISCONNECTED':DIAG.cell==='OFF'?'⊘ switched OFF (dev)':'✕ no chip — simulated',
+       DIAG.cell==='OK'?'ok':DIAG.cell==='ABSENT'?'warn':DIAG.cell==='OFF'?'warn':'bad');
     hw('dvHwImu', DIAG.imu?'● ok':'✕ off', DIAG.imu?'ok':'bad');
     hw('dvHwHap', DIAG.hap?'● ok':'✕ none', DIAG.hap?'ok':'bad');
     hw('dvHwPins', DIAG.pins?'DT=D'+DIAG.pins.split('/')[0]+' · SCK=D'+DIAG.pins.split('/')[1]:'—');
@@ -3608,13 +3615,16 @@ function updateDevTab(){ if(activeTab!=='development') return;
   { const cm=$d('dvCellMsg');
     if(cm){ const bad=DIAG.cell!=null && DIAG.cell!=='OK';
       cm.style.display=bad?'':'none';
-      cm.textContent=DIAG.cell==='NONE' ? 'Plug in the load cell amplifier (HX711) to start measurement — nothing is answering on the cell pins.'
+      cm.textContent=DIAG.cell==='OFF'  ? 'Load cell is switched OFF (Dev → Hardware presence). Re-detect below turns it back on.'
+                    :DIAG.cell==='NONE' ? 'Plug in the load cell amplifier (HX711) to start measurement — nothing is answering on the cell pins.'
                                         : 'Plug in the load cell to start measurement — the amplifier is reading a floating input right now.';
       if(bad){ DIAG.trace.length=0; const cv=$d('dvRawGraph'); if(cv){ const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); }
         set('dvRawG','—'); } } }
   // load cell + calibration test
   set('dvRaw', fresh&&DIAG.raw!=null&&DIAG.cell==='OK'?Math.round(DIAG.raw).toLocaleString():'—');
-  set('dvCellSt', (DIAG.cell==null||!fresh)?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':'simulated');
+  set('dvCellSt', (DIAG.cell==null||!fresh)?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':DIAG.cell==='OFF'?'switched off (dev)':'simulated');
+  { const b=$d('dvCellOffBtn'); if(b){ const off=DIAG.cell==='OFF';
+      const t=off?'✓ Re-enable load cell':'⊘ Switch load cell OFF'; if(b.textContent!==t) b.textContent=t; } }
   set('dvTare', DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—');
   set('dvFull', DIAG.tare!=null&&DIAG.scale?Math.round(DIAG.tare+DIAG.scale*HS.capacity).toLocaleString():'—');
   set('dvScale', DIAG.scale?DIAG.scale.toFixed(1):'—');
@@ -3771,7 +3781,7 @@ function buildPodReport(){
   add('  uptime       '+_dvUp(DIAG.up));
   add('  booted       '+(B&&B.boot?_dvWhen(B.boot):'—')+' · reason: '+(B?_dvRrText(B.rr):'—'));
   add(hr); add('HARDWARE');
-  add('  load cell    '+(DIAG.cell==='OK'?'wired, live':DIAG.cell==='ABSENT'?'DISCONNECTED (bridge unplugged)':DIAG.cell==='NONE'?'no amplifier — simulated':'—')
+  add('  load cell    '+(DIAG.cell==='OK'?'wired, live':DIAG.cell==='ABSENT'?'DISCONNECTED (bridge unplugged)':DIAG.cell==='OFF'?'switched OFF from the app':DIAG.cell==='NONE'?'no amplifier — simulated':'—')
     +(DIAG.pins?' · DT/SCK D'+DIAG.pins:''));
   add('  cell cal     tare '+(DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—')+' counts · scale '+(DIAG.scale?DIAG.scale.toFixed(1)+' counts/g':'—')+(DIAG.raw!=null&&DIAG.cell==='OK'?' · raw now '+Math.round(DIAG.raw).toLocaleString():''));
   add('  IMU '+(DIAG.imu?'ok':'off')+' · haptic '+(DIAG.hap?'ok':'none'));
