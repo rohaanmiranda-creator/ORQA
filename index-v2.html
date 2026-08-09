@@ -812,6 +812,9 @@
   .dvTbl{ width:100%; border-collapse:collapse; font-size:11px; color:#9fd9e6; margin-top:4px; }
   .dvTbl td{ padding:4px 6px; border-top:1px solid rgba(255,255,255,.07); } .dvTbl td:last-child{ text-align:right; color:#eafcff; }
   .dvCapIn{ width:70px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.15); border-radius:8px; color:#eafcff; padding:4px 6px; font-size:12px; }
+  .dvReport{ font-family:ui-monospace,'Cascadia Mono',Consolas,monospace; font-size:10.5px; line-height:1.55; color:#cfe8f2;
+    background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:11px; margin-top:8px;
+    white-space:pre-wrap; word-break:break-word; user-select:text; -webkit-user-select:text; max-height:52vh; overflow:auto; }
   /* Dev tab as a settings page — dark, blue-accented, sub-pages slide in/out */
   .dvMenu{ display:flex; flex-direction:column; gap:8px; margin-top:4px; }
   .dvItem{ display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:14px; background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.22); cursor:pointer; transition:background .15s; }
@@ -3193,14 +3196,17 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.SCT!==undefined) DIAG.sip={ tilt:num(o.SCT,35), min:num(o.SMN,500), max:num(o.SMX,8000), ml:num(o.SML,5), settle:num(o.SST,900) };
     if(o.SFX){ const p=o.SFX.split('/'); DIAG.sipfx={ col:(p[0]||'00c83c').toLowerCase(), ms:+p[1]||400, pat:+p[2]||1, amp:+p[3]||60, on:p[4]!=='0' }; }
     if(o.RP){ const p=o.RP.split('/'); DIAG.ringPwr={ pin:+p[0], ah:p[1]==='1', on:p[2]!=='0' }; }
+    if(o.RD!==undefined) DIAG.ringData=num(o.RD,8);
   } else if(str.slice(0,3)==='D3|'){
     DIAG.batt={ lch:num(o.LCH,0), boot:num(o.BOOT,0), rr:o.RR||'?', rrx:o.RRX||'',
-      vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1' };
+      vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1', cc:num(o.CC,50) };
   }
   updateDevTab(); }
 // DR| fast raw stream — update just the raw readout + trace, not the whole panel
 function podDiagRaw(str){ const o=_kv(str); const r=+o.RAW; if(!Number.isFinite(r)) return;
-  DIAG.raw=r; if(o.CELL) DIAG.cell=o.CELL; DIAG.lastD=Date.now(); DIAG.lastDR=Date.now(); DIAG.have=true; DIAG.unsupported=false;
+  if(o.CELL) DIAG.cell=o.CELL; DIAG.lastD=Date.now(); DIAG.lastDR=Date.now(); DIAG.have=true; DIAG.unsupported=false;
+  if(DIAG.cell!=='OK'){ if(activeTab==='development') updateDevTab(); return; }   // floating input: show "plug in the cell", not noise
+  DIAG.raw=r;
   DIAG.trace.push(r); while(DIAG.trace.length>90) DIAG.trace.shift();
   if(activeTab!=='development') return;
   const n=document.getElementById('dvRaw'); if(n) n.textContent=Math.round(r).toLocaleString();
@@ -3265,7 +3271,8 @@ const DVSECTIONS=[
   { k:'cell',   ic:'⚖️', t:'Load cell · calibration', s:'raw counts · live trace · cal test' },
   { k:'engine', ic:'🥤', t:'Sip engine',              s:'settings · effects · decisions · raw log' },
   { k:'lights', ic:'💡', t:'Lights',                  s:'stored vs working RGB config' },
-  { k:'power',  ic:'🔋', t:'Battery & power',         s:'per-component draw · est. life' } ];
+  { k:'power',  ic:'🔋', t:'Battery & power',         s:'per-component draw · est. life' },
+  { k:'report', ic:'📄', t:'Report',                  s:'key events + detailed battery · copy / save' } ];
 function dvNav(k, pop){ DIAG.view=k||null; _dvRender(pop?'pop':(k?'push':null)); }
 function _dvRender(anim){
   const v=DIAG.view;
@@ -3305,8 +3312,10 @@ function _dvSubHTML(v){
       <div class="teleCard" id="dvHwImu"><span class="tlk">IMU · MOTION</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwHap"><span class="tlk">HAPTIC DRIVER</span><b class="tlv">—</b></div>
       <div class="teleCard" id="dvHwPins"><span class="tlk">HX711 WIRING</span><b class="tlv">—</b></div>
+      <div class="teleCard" id="dvHwLed" style="grid-column:1/-1"><span class="tlk">LED RING · write-only line, presence can't be sensed</span><b class="tlv">—</b></div>
     </div>`;
   if(v==='cell') return head+`
+    <div class="dvBanner" id="dvCellMsg" style="display:none">Plug in the load cell to start measurement — the amplifier is reading a floating input right now.</div>
     <div class="teleGrid">
       <div class="teleCard raw"><span class="tlk">RAW COUNTS · LIVE</span><b class="tlv" id="dvRaw">—</b></div>
       <div class="teleCard raw"><span class="tlk">Δ FROM TARE</span><b class="tlv" id="dvRawG">—</b></div>
@@ -3391,6 +3400,9 @@ function _dvSubHTML(v){
       <div class="brow"><span>Reminder light</span><b id="dvLedRem">—</b></div>
       <div class="brow"><span>Ring power rail</span><b id="dvRingPwr">—</b></div>
     </div>
+    <div class="lbl" style="margin-top:14px">RING SIMULATOR · live copy of what the pod shows</div>
+    <div id="dvRingSim" style="position:relative;width:128px;height:128px;margin:12px auto 4px"></div>
+    <div class="bsub" id="dvRingSimNote" style="text-align:center">—</div>
     <div class="lbl" style="margin-top:14px">RING RAIL GATE · kills the ~10 mA idle draw</div>
     <div class="bsub">the WS2812s draw ~10 mA from their rail even showing black. Wire a MOSFET on the ring's power (V1 board has one; bench: P-FET, gate to a spare GPIO) and tell the pod which pin drives it — the firmware then cuts the rail whenever the ring is dark for 2 s.</div>
     <div class="devRow"><span>Gate pin</span><input id="dvRpPin" class="dvCapIn" type="number" min="0" max="10" value="6"><span class="chip" id="dvRpAH" data-v="0">active-low</span></div>
@@ -3421,7 +3433,16 @@ function _dvSubHTML(v){
       <div class="brow"><span>Voltage stable for use</span><b id="dvVst">—</b></div>
       <div class="brow" id="dvChtRow" style="display:none"><span>Est. full charge in</span><b id="dvCht">—</b></div>
     </div>
-    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>`;
+    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Battery capacity <input id="dvCap" class="dvCapIn" type="number" min="100" max="5000" step="50"> mAh</div><span class="evJoin" id="dvCapSet">Save to pod</span></div>
+    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Charge current <b id="dvCc">—</b> · XIAO HICHG pin</div><span class="evJoin" id="dvCcBtn">switch</span></div>`;
+  if(v==='report') return head+`
+    <div class="bsub">everything the pod knows right now — key events, decisions, detailed battery. Long-press / drag to select, or use the buttons.</div>
+    <div class="dpBtns">
+      <button class="devBtn" id="dvRepCopy">⧉ Copy</button>
+      <button class="devBtn" id="dvRepSave">↓ Save .txt</button>
+      <button class="devBtn" id="dvRepRegen">↻ Regenerate</button>
+    </div>
+    <pre class="dvReport" id="dvReport">generating…</pre>`;
   return head; }
 function _dvWire(v){
   const $d=id=>document.getElementById(id);
@@ -3478,6 +3499,11 @@ function _dvWire(v){
         if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); else toast('Connect the pod first'); }; }
   }
   if(v==='lights'){
+    { const sim=$d('dvRingSim');
+      if(sim){ sim.innerHTML=Array.from({length:14},(_,i)=>{ const a=i/14*2*Math.PI-Math.PI/2, x=64+52*Math.cos(a)-6, y=64+52*Math.sin(a)-6;
+          return '<i class="dvSimPx" data-i="'+i+'" style="position:absolute;left:'+x.toFixed(0)+'px;top:'+y.toFixed(0)+'px;width:12px;height:12px;border-radius:50%;background:#0a1622;border:1px solid rgba(255,255,255,.12)"></i>'; }).join('');
+        clearInterval(DIAG._simIv);
+        DIAG._simIv=setInterval(()=>{ if(DIAG.view!=='lights'||activeTab!=='development'){ clearInterval(DIAG._simIv); DIAG._simIv=null; return; } _dvRingSimTick(); }, 120); } }
     { const ah=$d('dvRpAH'); if(ah) ah.onclick=()=>{ const on=ah.dataset.v!=='1'; ah.dataset.v=on?'1':'0';
         ah.textContent=on?'active-high':'active-low'; ah.classList.toggle('on',on); }; }
     { const b=$d('dvRpSet'); if(b) b.onclick=()=>{ const p=Math.round(+$d('dvRpPin').value);
@@ -3489,7 +3515,20 @@ function _dvWire(v){
   if(v==='power'){ const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
     const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const val=Math.round(+$d('dvCap').value);
       if(!(val>=100 && val<=5000)){ toast('Capacity must be 100–5000 mAh'); return; }
-      if(podCommand('BATTCAP:'+val)) toast('Capacity '+val+' mAh — saved on the pod'); else toast('Connect the pod first'); }; }
+      if(podCommand('BATTCAP:'+val)) toast('Capacity '+val+' mAh — saved on the pod'); else toast('Connect the pod first'); };
+    const cc=$d('dvCcBtn'); if(cc) cc.onclick=()=>{ const cur=(DIAG.batt&&DIAG.batt.cc)||50; const next=cur===50?100:50;
+      if(podCommand('CHGCUR:'+next)) toast('Charge current → '+next+' mA (saved on the pod)'); else toast('Connect the pod first'); }; }
+  if(v==='report'){
+    const fill=()=>{ const p=$d('dvReport'); if(p) p.textContent=buildPodReport(); };
+    fill();
+    { const c=$d('dvRepCopy'); if(c) c.onclick=async()=>{ try{ await navigator.clipboard.writeText($d('dvReport').textContent); toast('Report copied'); }
+        catch(e){ toast('Copy blocked — long-press the text to select it'); } }; }
+    { const s=$d('dvRepSave'); if(s) s.onclick=()=>{ const blob=new Blob([$d('dvReport').textContent],{type:'text/plain'});
+        const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download='orqa-pod-report-'+new Date().toISOString().slice(0,16).replace(/[T:]/g,'-')+'.txt';
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 4000); }; }
+    { const g=$d('dvRepRegen'); if(g) g.onclick=()=>{ fill(); toast('Report refreshed'); }; }
+  }
 }
 let _dvDecShown=-1, _dvSipKey='';
 function updateDevTab(){ if(activeTab!=='development') return;
@@ -3532,9 +3571,21 @@ function updateDevTab(){ if(activeTab!=='development') return;
     hw('dvHwImu', DIAG.imu?'● ok':'✕ off', DIAG.imu?'ok':'bad');
     hw('dvHwHap', DIAG.hap?'● ok':'✕ none', DIAG.hap?'ok':'bad');
     hw('dvHwPins', DIAG.pins?'DT=D'+DIAG.pins.split('/')[0]+' · SCK=D'+DIAG.pins.split('/')[1]:'—');
+    { const R=DIAG.ringPwr, ledOn=DIAG.led&&DIAG.led.mode!==0;
+      hw('dvHwLed', 'data D'+(DIAG.ringData!=null?DIAG.ringData:'8')
+        +' · rail '+(!R?'?':R.pin>10?'hardwired, always powered':'gated D'+R.pin+' · '+(R.on?'ON':'OFF'))
+        +' · light '+(ledOn?(LEDMODES[DIAG.led.mode]||'on'):'off'),
+        (R&&R.pin<=10&&!R.on)?'ok':''); }
   }
+  { const cm=$d('dvCellMsg');
+    if(cm){ const bad=DIAG.cell!=null && DIAG.cell!=='OK';
+      cm.style.display=bad?'':'none';
+      cm.textContent=DIAG.cell==='NONE' ? 'Plug in the load cell amplifier (HX711) to start measurement — nothing is answering on the cell pins.'
+                                        : 'Plug in the load cell to start measurement — the amplifier is reading a floating input right now.';
+      if(bad){ DIAG.trace.length=0; const cv=$d('dvRawGraph'); if(cv){ const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); }
+        set('dvRawG','—'); } } }
   // load cell + calibration test
-  set('dvRaw', DIAG.raw!=null&&DIAG.cell!=='NONE'?Math.round(DIAG.raw).toLocaleString():'—');
+  set('dvRaw', DIAG.raw!=null&&DIAG.cell==='OK'?Math.round(DIAG.raw).toLocaleString():'—');
   set('dvCellSt', DIAG.cell==null?'—':DIAG.cell==='OK'?(DIAG.slp?'sleeping (power save)':(DIAG.bot?'weighing':'paused — pod out')):DIAG.cell==='ABSENT'?'bridge unplugged':'simulated');
   set('dvTare', DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—');
   set('dvFull', DIAG.tare!=null&&DIAG.scale?Math.round(DIAG.tare+DIAG.scale*HS.capacity).toLocaleString():'—');
@@ -3617,13 +3668,15 @@ function updateDevTab(){ if(activeTab!=='development') return;
   // battery & power
   const pct=POD.battery!=null?Math.max(0,Math.min(100,Math.round(POD.battery))):null;
   set('dvBatt', (pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':''));
-  set('dvSrc', DIAG.cell==null?'—':DIAG.usb?(DIAG.chg?'USB — charging':'USB powered'):'battery');
+  set('dvSrc', DIAG.cell==null?'—':DIAG.usb?(DIAG.chg?'USB — charging':(pct!=null&&pct>=97?'USB — charge complete':'USB powered')):'battery');
   set('dvPs', DIAG.cell==null?'—':(['auto','always on','off'][DIAG.ps[0]]||'?')+(DIAG.ps[1]?' · ACTIVE':' · idle'));
   set('dvMa', DIAG.ma!=null?DIAG.ma.toFixed(1)+' mA':'—');
   { const bars=$d('dvBars'); if(bars && DIAG.pw){
       const names=['Board','BLE radio','Load cell','IMU','LED ring','Haptic'];
+      if(DIAG.led&&DIAG.led.mode===0) names[4]='LED ring · idle';         // light OFF: what's left is rail quiescent
+      if(DIAG.slp||DIAG.bot===false) names[2]='Load cell · asleep';       // 0.05 mA = HX711 power-down current
       const html=DIAG.pw.map((val,i)=>{ const w=DIAG.ma?Math.max(1.5,val/DIAG.ma*100):0;
-        return '<div class="dvBar"><span class="k">'+names[i]+'</span><span class="tr"><i style="width:'+w.toFixed(1)+'%"></i></span><b>'+val.toFixed(1)+' mA</b></div>'; }).join('');
+        return '<div class="dvBar"><span class="k">'+names[i]+'</span><span class="tr"><i style="width:'+w.toFixed(1)+'%"></i></span><b>'+(val<0.1?val.toFixed(2):val.toFixed(1))+' mA</b></div>'; }).join('');
       if(bars.innerHTML!==html) bars.innerHTML=html; }
     else if(bars && !DIAG.pw) bars.innerHTML='<div class="bsub">component breakdown needs the diagnostics stream</div>'; }
   if(pct!=null && DIAG.ma) set('dvLifeNow', _dvLife(DIAG.cap*(pct/100)/DIAG.ma)+' · at '+DIAG.ma.toFixed(1)+' mA'); else set('dvLifeNow','—');
@@ -3640,10 +3693,91 @@ function updateDevTab(){ if(activeTab!=='development') return;
     const cr=$d('dvChtRow'); if(cr){ const show=!!(B&&B.chg&&B.cht>0); cr.style.display=show?'':'none';
       if(show) set('dvCht', (B.cht>=60?Math.floor(B.cht/60)+'h ':'')+(B.cht%60)+'m at ~50 mA'); } }
   { const cp=$d('dvCap'); if(cp && document.activeElement!==cp && String(cp.value)!==String(DIAG.cap)) cp.value=DIAG.cap; }
+  { const cc=DIAG.batt?DIAG.batt.cc:null; set('dvCc', cc?cc+' mA':'—');
+    const b=$d('dvCcBtn'); if(b && cc){ const t='switch to '+(cc===50?100:50)+' mA'; if(b.textContent!==t) b.textContent=t; } }
 }
 function _dvWhen(e){ if(!e) return '—';   // pod epochs are LOCAL-time epochs (SETTIME pushes local)
   const d=new Date(e*1000 + new Date().getTimezoneOffset()*60000);
   return d.toLocaleDateString([], {month:'short', day:'numeric'})+' · '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+// ── ring simulator: replays the firmware's LED modes on 14 dots (Lights page) ──
+function _dvRingSimTick(){
+  const px=document.querySelectorAll('#dvRingSim .dvSimPx'); if(!px.length) return;
+  const note=document.getElementById('dvRingSimNote');
+  const L=DIAG.led, R=DIAG.ringPwr, now=Date.now();
+  const railOff=R && R.pin<=10 && !R.on;
+  const setP=(el,c,glow)=>{ const s='rgb('+(c>>16&255)+','+(c>>8&255)+','+(c&255)+')';
+    el.style.background=c?s:'#0a1622'; el.style.boxShadow=c&&glow?'0 0 8px '+s:'none'; };
+  const hex=h=>parseInt(h,16)||0;
+  const scale=(c,f)=>((c>>16&255)*f<<16|((c>>8&255)*f)<<8|(c&255)*f)&0xFFFFFF;
+  const blend=(a,b,f)=>((((a>>16&255)*(1-f)+(b>>16&255)*f)&255)<<16 | (((a>>8&255)*(1-f)+(b>>8&255)*f)&255)<<8 | (((a&255)*(1-f)+(b&255)*f)&255));
+  const wheel=p=>{ p=255-(p&255); if(p<85) return (255-p*3)<<16|p*3; if(p<170){p-=85; return (p*3)<<8|(255-p*3);} p-=170; return (p*3)<<16|(255-p*3)<<8; };
+  if(!L || railOff || L.mode===0){ px.forEach(e=>setP(e,0));
+    if(note) note.textContent = railOff?'rail is CUT — ring fully off, zero idle draw'
+      : !L?'needs the diagnostics stream':'light OFF — pixels dark'+(R&&R.pin>10?' · rail still powered (~10 mA idle)':'');
+    return; }
+  const cols=(L.cols&&L.cols.length?L.cols:['46e0d2']).map(hex), n=cols.length, bf=(L.bright||55)/100;
+  px.forEach((el,i)=>{ let c=0;
+    switch(L.mode){
+      case 1: c=scale(cols[0],bf); break;                                        // solid
+      case 2: { const t=now%(n*2400), j=Math.floor(t/2400); c=scale(blend(cols[j],cols[(j+1)%n],(t%2400)/2400),bf); break; }  // gradient
+      case 3: c=scale(wheel(Math.floor(now/12)+i*256/14),bf); break;             // rainbow
+      case 4: { const step=Math.floor(now/70), head=step%14, d=(head-i+14)%14;   // spin
+                c=d<3?scale(scale(cols[Math.floor(step/14)%n],bf),1-d*0.35):0; break; }
+      case 5: c=(now%900)<200?scale(cols[Math.floor(now/900)%n],bf):0; break;    // pulse
+      default:{ const br=0.08+0.92*(Math.sin((now%2400)/2400*2*Math.PI-Math.PI/2)+1)/2;  // breathe
+                c=scale(cols[Math.floor(now/2400)%n],bf*br); } }
+    setP(el,c,true); });
+  if(note){ const t=(LEDMODES[L.mode]||'?')+' · '+(L.bright||55)+'%'+(L.saver?' · saver on':''); if(note.textContent!==t) note.textContent=t; }
+}
+// ── the pod report: key events + detailed battery, as selectable/savable text ──
+function buildPodReport(){
+  const L=[], add=s=>L.push(s), hr='──────────────────────────────────';
+  const B=DIAG.batt, S=DIAG.sip, F=DIAG.sipfx, R=DIAG.ringPwr;
+  const pct=POD.battery!=null?Math.round(POD.battery):null;
+  add('ORQA POD REPORT · '+new Date().toLocaleString());
+  add(hr); add('POD');
+  add('  name         '+(HS.podName||(POD.device&&POD.device.name)||'—'));
+  add('  link         '+(POD.connected?(POD.mock?'demo':'connected'):'offline')+' · diagnostics '+(DIAG.have&&Date.now()-DIAG.lastD<3500?'streaming v'+(DIAG.v||'?'):'not streaming'));
+  add('  uptime       '+_dvUp(DIAG.up));
+  add('  booted       '+(B&&B.boot?_dvWhen(B.boot):'—')+' · reason: '+(B?_dvRrText(B.rr):'—'));
+  add(hr); add('HARDWARE');
+  add('  load cell    '+(DIAG.cell==='OK'?'wired, live':DIAG.cell==='ABSENT'?'DISCONNECTED (bridge unplugged)':DIAG.cell==='NONE'?'no amplifier — simulated':'—')
+    +(DIAG.pins?' · DT/SCK D'+DIAG.pins:''));
+  add('  cell cal     tare '+(DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—')+' counts · scale '+(DIAG.scale?DIAG.scale.toFixed(1)+' counts/g':'—')+(DIAG.raw!=null&&DIAG.cell==='OK'?' · raw now '+Math.round(DIAG.raw).toLocaleString():''));
+  add('  IMU '+(DIAG.imu?'ok':'off')+' · haptic '+(DIAG.hap?'ok':'none'));
+  add('  LED ring     rail '+(!R?'—':R.pin>10?'hardwired (~10 mA idle — V1 MOSFET removes)':'gated on D'+R.pin+' · '+(R.on?'ON':'OFF · zero idle')));
+  add(hr); add('SIP ENGINE');
+  if(S) add('  rules        arm >'+S.tilt+'° · '+(S.min/1000)+'–'+(S.max/1000)+' s · ≥'+S.ml+' ml · settle '+(S.settle/1000)+' s');
+  if(F) add('  sip effect   '+(F.on?('flash #'+F.col+' '+F.ms+' ms · haptic pattern '+F.pat+' @ '+F.amp+'%'):'off'));
+  add('  bottle mode  '+(POD.state==='OUT'?'PAUSED — pod out of the bottle':'tracking')+(DEVUI.pausedSips?' · paused-sip override ON':''));
+  add('  today        '+(POD.sips||0)+' sips · '+Math.round(POD.totalMl||0)+' ml drunk · '+(POD.refills||0)+' refills ('+Math.round(POD.refillMl||0)+' ml) · '+(POD.disposes||0)+' discarded ('+Math.round(POD.disposeMl||0)+' ml)');
+  add('  journal      '+(DIAG.hist?DIAG.hist.split('/')[0]+' synced / '+DIAG.hist.split('/')[1]+' logged':'—'));
+  add(hr); add('DECISIONS · newest first');
+  DEVDEC.length ? DEVDEC.slice(0,20).forEach(e=>add('  '+clk(e.t)+'  '+e.text)) : add('  none this session');
+  add(hr); add('KEY EVENTS · newest first');
+  NOTELOG.length ? NOTELOG.slice(0,30).forEach(x=>add('  '+clk(new Date(x.t))+'  '+String(x.html).replace(/<[^>]*>/g,''))) : add('  none this session');
+  add(hr); add('BATTERY · detailed');
+  add('  now          '+(pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':'')
+    +' · '+(!B?'—':B.chg?'CHARGING @ '+(B.cc||50)+' mA':DIAG.usb?'USB — charge complete':'on battery'));
+  if(B){
+    add('  stability    '+(B.vst?'stable':'UNSTABLE — sagging under load')+(B.vlo!=null&&B.vlo<90?' · window '+B.vlo.toFixed(2)+'–'+B.vhi.toFixed(2)+' V':''));
+    add('  last charge  finished '+(B.lch?_dvWhen(B.lch):'— (still charging or never seen)'));
+    if(B.chg&&B.cht) add('  est. full in '+(B.cht>=60?Math.floor(B.cht/60)+'h ':'')+(B.cht%60)+'m at '+(B.cc||50)+' mA');
+    add('  learned drain '+(B.dph>0.01?B.dph.toFixed(2)+' %/h → '+_dvLife((pct||0)/B.dph)+' left from '+pct+'%':'not learned yet — needs unplugged runtime'));
+  }
+  add('  capacity     '+DIAG.cap+' mAh (configured)');
+  if(DIAG.pw){ const names=['board','BLE','load cell','IMU','LED ring','haptic'];
+    add('  power model  '+DIAG.pw.map((v,i)=>names[i]+' '+(v<0.1?v.toFixed(2):v.toFixed(1))).join(' · '));
+    add('               total '+(DIAG.ma!=null?DIAG.ma.toFixed(1):'—')+' mA connected · '+(DIAG.mas!=null?DIAG.mas.toFixed(1):'—')+' mA standalone');
+    if(pct!=null&&DIAG.ma) add('  est. life    '+_dvLife(DIAG.cap*(pct/100)/DIAG.ma)+' connected · '+(DIAG.mas?_dvLife(DIAG.cap*(pct/100)/DIAG.mas):'—')+' standalone (model)');
+  }
+  add(hr); add('NOTES');
+  if(B&&B.chg&&pct!=null&&pct>=93) add('  · 93–97% during a long charge is the CV tail: the voltage gauge compresses near full and the '+(B.cc||50)+' mA charger tapers. The pod reports 100% the moment the charger signals done. '+((B.cc||50)===50?'Switching charge current to 100 mA (Battery page) roughly halves charge time.':''));
+  if(R&&R.pin>10&&DIAG.led&&DIAG.led.mode===0) add('  · LED ring shows idle draw with the light OFF — WS2812 quiescent current on the hardwired rail; the V1 MOSFET gate (or bench bodge + RINGPWR) removes it.');
+  if(DIAG.slp) add('  · load cell 0.05 mA = HX711 power-down sleep current (pod paused or power save).');
+  if(!DIAG.have) add('  · pod diagnostics were not streaming when this report was generated — connect the pod and open the Dev tab first for full data.');
+  return L.join('\n');
+}
 function _dvRrText(rr){ return rr==='PIN'      ? 'reset button / flashing'
                              : rr==='WATCHDOG' ? 'watchdog — firmware hang'
                              : rr==='SOFTWARE' ? 'software restart — command, rename or update'
