@@ -1974,7 +1974,9 @@ function bottleHTML(){ const ml=POD.connected?(stableWaterMl()||0):0; const wl=P
       <span class="chip" data-m="gradient">Gradient</span><span class="chip" data-m="rainbow">Rainbow</span>
       <span class="chip" data-m="spin">Spin</span><span class="chip" data-m="pulse">Pulse</span>
       <span class="chip" data-m="breathe">Breathe</span>
+      <span class="chip" data-m="ecospin">Eco spin</span>
     </div>
+    <div class="bsub">Eco spin = one sweep in your colour, then fully dark for 6 s — the battery-saver light (full savings once the ring's power rail is gated)</div>
     <div class="lightRow" style="align-items:center;gap:8px">
       <input type="color" id="ledPick" value="#46e0d2">
       <span class="chip" id="ledAddCol">+ add colour</span>
@@ -3180,7 +3182,7 @@ const DIAG={ have:false, lastD:0, unsupported:false, v:null,
   led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null, trace:[],
   view:null, calRes:null, lastDR:0 };
 const DEVDEC=[]; let _devDecV=0;
-const LEDMODES=['off','solid','gradient','rainbow','spin','pulse','breathe'];
+const LEDMODES=['off','solid','gradient','rainbow','spin','pulse','breathe','ecospin'];
 const OVLNAMES=['none','app effect','reminder','find-my-pod ring'];
 function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; DIAG.unsupported=false;
   if(str.slice(0,3)==='D1|'){
@@ -3199,6 +3201,7 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.RP){ const p=o.RP.split('/'); DIAG.ringPwr={ pin:+p[0], ah:p[1]==='1', on:p[2]!=='0' }; }
     if(o.RD!==undefined) DIAG.ringData=num(o.RD,8);
     if(o.RF!==undefined) DIAG.ringFit=o.RF==='1';
+    if(o.RN!==undefined) DIAG.ringN=num(o.RN,14);
   } else if(str.slice(0,3)==='D3|'){
     DIAG.batt={ lch:num(o.LCH,0), boot:num(o.BOOT,0), rr:o.RR||'?', rrx:o.RRX||'',
       vst:o.VST==='1', vlo:num(o.VLO,null), vhi:num(o.VHI,null), cht:num(o.CHT,0), dph:num(o.DPH,0), chg:o.CHG==='1', cc:num(o.CC,50) };
@@ -3274,7 +3277,36 @@ const DVSECTIONS=[
   { k:'engine', ic:'🥤', t:'Sip engine',              s:'settings · effects · decisions · raw log' },
   { k:'lights', ic:'💡', t:'Lights',                  s:'stored vs working RGB config' },
   { k:'power',  ic:'🔋', t:'Battery & power',         s:'per-component draw · est. life' },
-  { k:'report', ic:'📄', t:'Report',                  s:'key events + detailed battery · copy / save' } ];
+  { k:'report', ic:'📄', t:'Report',                  s:'key events + detailed battery · copy / save' },
+  { k:'updates',ic:'📝', t:'Update log',              s:'what changed — app + firmware' } ];
+// hand-curated: every meaningful change to the app and the pod firmware, newest first
+const DEVCHANGELOG=[
+  { d:'9 Aug · late', rows:[
+    ['fw','Eco spin light mode — one sweep, ~6 s fully dark; rail gate cuts power in the gap (LEDMODE:ECOSPIN)'],
+    ['fw','Ring pixel count configurable — RINGN drives animations, power model, simulator (bench ring = 8 px)'],
+    ['fw','Ring glitch fix — HX711 pin-scan no longer touches the ring data line; stray latched pixels auto-wiped'],
+    ['fw','Battery gauge rebuilt — LiPo rest-voltage curve; charger-done on USB now reads 100%'],
+    ['fw','CELLOFF — load cell master switch (no probe, chip in power-down, simulated volume)'],
+    ['fw','Cell detection hardened — triple-read probe, rail check, motion-response detector'],
+    ['fw','RINGFIT — mark the ring as physically absent; power model drops its share'],
+    ['app','Update log (this page) · Report page with copy/save · Cell Response Test'],
+    ['app','Stale diagnostic values blank to dashes after disconnect/reboot'] ]},
+  { d:'9 Aug', rows:[
+    ['both','Component-testing mode — consumer tabs parked, Dev chips re-enable them'],
+    ['fw','Sip rules + effects configurable and persisted (SIPCFG / SIPFX / SIMSIP test sip)'],
+    ['fw','Battery history — last charged, reboot reason (RESETREAS), voltage-stability window, learned drain %/h, charge current 50/100 mA (CHGCUR)'],
+    ['fw','Onboard XIAO LED = battery indicator only (charging yellow→green, full green, <5% red flashes)'],
+    ['fw','Ring rail gate (RINGPWR) — dark ring auto-cuts its power rail once a MOSFET is wired'],
+    ['app','Pod auto-connects on open — bound to the signed-in account (persistent Web Bluetooth)'],
+    ['app','Paused pod counts nothing — sip frames dropped + logged; “Sips while paused” override'],
+    ['app','Sip engine page — settings, effects, live rules, decision log, raw sip log combined'] ]},
+  { d:'6 Aug', rows:[
+    ['both','Development tab born — D1/D2 diagnostics, hardware presence, decision log, power model'],
+    ['fw','v5 protocol — DBG diag streams, EVT|DECIDE gesture verdicts, BATTCAP'],
+    ['fw','Live load-cell trace at ~7 Hz (DR frames) + HXPROBE re-detect'],
+    ['app','Settings-style Dev navigation + guided pod-scale calibration (CALW)'],
+    ['app','Nav bar polish — sliding tab highlighter; connection state = dot, not glow'],
+    ['app','Pod placement chips (BOTTLE:IN/OUT) · GitHub Pages now serves the test branch directly'] ]} ];
 function dvNav(k, pop){ DIAG.view=k||null; _dvRender(pop?'pop':(k?'push':null)); }
 function _dvRender(anim){
   const v=DIAG.view;
@@ -3418,7 +3450,8 @@ function _dvSubHTML(v){
       <button class="devBtn" id="dvRpSet">✓ Enable gate</button>
       <button class="devBtn" id="dvRpOff">Disable (rail hardwired)</button>
     </div>
-    <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Ring fitted: <b id="dvRingFit">—</b> — the data line is write-only, so tell the pod when the ring is off the bench wires and its power share drops to zero</div><span class="evJoin" id="dvRingFitBtn">toggle</span></div>`;
+    <div class="findRow" style="margin-top:10px"><div class="bsub" style="margin:0">Ring fitted: <b id="dvRingFit">—</b> — the data line is write-only, so tell the pod when the ring is off the bench wires and its power share drops to zero</div><span class="evJoin" id="dvRingFitBtn">toggle</span></div>
+    <div class="findRow" style="margin-top:8px"><div class="bsub" style="margin:0">Ring pixels <input id="dvRingN" class="dvCapIn" type="number" min="1" max="60"> on the wires — drives animations, the power model and this simulator</div><span class="evJoin" id="dvRingNSet">Save to pod</span></div>`;
   if(v==='power') return head+`
     <div class="teleGrid">
       <div class="teleCard"><span class="tlk">BATTERY</span><b class="tlv" id="dvBatt">—</b></div>
@@ -3452,6 +3485,10 @@ function _dvSubHTML(v){
       <button class="devBtn" id="dvRepRegen">↻ Regenerate</button>
     </div>
     <pre class="dvReport" id="dvReport">generating…</pre>`;
+  if(v==='updates') return head+`
+    <div class="bsub">every meaningful change to the app and the pod firmware, newest first — <b>fw</b> needs a flash, <b>app</b> arrives on reload</div>
+    `+DEVCHANGELOG.map(e=>'<div class="lbl" style="margin-top:12px">'+e.d.toUpperCase()+'</div><div class="dvLog">'
+      +e.rows.map(r=>'<div class="dvLine '+(r[0]==='fw'?'refill':r[0]==='app'?'sip':'none')+'"><span class="dvT">'+r[0]+'</span>'+r[1]+'</div>').join('')+'</div>').join('');
   return head; }
 function _dvWire(v){
   const $d=id=>document.getElementById(id);
@@ -3532,8 +3569,7 @@ function _dvWire(v){
   }
   if(v==='lights'){
     { const sim=$d('dvRingSim');
-      if(sim){ sim.innerHTML=Array.from({length:14},(_,i)=>{ const a=i/14*2*Math.PI-Math.PI/2, x=64+52*Math.cos(a)-6, y=64+52*Math.sin(a)-6;
-          return '<i class="dvSimPx" data-i="'+i+'" style="position:absolute;left:'+x.toFixed(0)+'px;top:'+y.toFixed(0)+'px;width:12px;height:12px;border-radius:50%;background:#0a1622;border:1px solid rgba(255,255,255,.12)"></i>'; }).join('');
+      if(sim){ sim.dataset.n='';   // tick builds the dots for the pod's REAL pixel count
         clearInterval(DIAG._simIv);
         DIAG._simIv=setInterval(()=>{ if(DIAG.view!=='lights'||activeTab!=='development'){ clearInterval(DIAG._simIv); DIAG._simIv=null; return; } _dvRingSimTick(); }, 120); } }
     { const ah=$d('dvRpAH'); if(ah) ah.onclick=()=>{ const on=ah.dataset.v!=='1'; ah.dataset.v=on?'1':'0';
@@ -3545,6 +3581,9 @@ function _dvWire(v){
     { const b=$d('dvRpOff'); if(b) b.onclick=()=>{ if(podCommand('RINGPWR:OFF')) toast('Gate disabled — rail treated as hardwired'); else toast('Connect the pod first'); }; }
     { const b=$d('dvRingFitBtn'); if(b) b.onclick=()=>{ const now=DIAG.ringFit!==false;
         if(podCommand('RINGFIT:'+(now?0:1))) toast(now?'Ring marked NOT fitted — power model drops it':'Ring marked fitted again'); else toast('Connect the pod first'); }; }
+    { const b=$d('dvRingNSet'); if(b) b.onclick=()=>{ const n2=Math.round(+$d('dvRingN').value);
+        if(!(n2>=1 && n2<=60)){ toast('Pixel count must be 1–60'); return; }
+        if(podCommand('RINGN:'+n2)) toast(n2+' pixels — saved on the pod'); else toast('Connect the pod first'); }; }
   }
   if(v==='power'){ const cp=$d('dvCap'); if(cp) cp.value=DIAG.cap;
     const b=$d('dvCapSet'); if(b) b.onclick=()=>{ const val=Math.round(+$d('dvCap').value);
@@ -3704,7 +3743,8 @@ function updateDevTab(){ if(activeTab!=='development') return;
       : !R ? '—'
       : R.pin>10 ? 'no gate — always powered (~10 mA idle)'
       : 'gated on D'+R.pin+' ('+(R.ah?'active-high':'active-low')+') · rail '+(R.on?'ON':'OFF — idle draw zero'));
-    set('dvRingFit', DIAG.ringFit===false?'NO — power share zeroed':(DIAG.ringFit?'yes':'—')); }
+    set('dvRingFit', DIAG.ringFit===false?'NO — power share zeroed':(DIAG.ringFit?'yes':'—'));
+    { const rn=$d('dvRingN'); if(rn && document.activeElement!==rn && DIAG.ringN && String(rn.value)!==String(DIAG.ringN)) rn.value=DIAG.ringN; } }
   // battery & power
   const pct=POD.battery!=null?Math.max(0,Math.min(100,Math.round(POD.battery))):null;
   set('dvBatt', (pct!=null?pct+'%':'—')+(POD.voltage!=null?' · '+POD.voltage.toFixed(2)+' V':''));
@@ -3741,7 +3781,12 @@ function _dvWhen(e){ if(!e) return '—';   // pod epochs are LOCAL-time epochs 
   return d.toLocaleDateString([], {month:'short', day:'numeric'})+' · '+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
 // ── ring simulator: replays the firmware's LED modes on 14 dots (Lights page) ──
 function _dvRingSimTick(){
-  const px=document.querySelectorAll('#dvRingSim .dvSimPx'); if(!px.length) return;
+  const simEl=document.getElementById('dvRingSim'); if(!simEl) return;
+  const N=DIAG.ringN||14;
+  if(+simEl.dataset.n!==N){ simEl.dataset.n=N;   // (re)build for the pod's actual pixel count
+    simEl.innerHTML=Array.from({length:N},(_,i)=>{ const a=i/N*2*Math.PI-Math.PI/2, x=64+52*Math.cos(a)-6, y=64+52*Math.sin(a)-6;
+      return '<i class="dvSimPx" data-i="'+i+'" style="position:absolute;left:'+x.toFixed(0)+'px;top:'+y.toFixed(0)+'px;width:12px;height:12px;border-radius:50%;background:#0a1622;border:1px solid rgba(255,255,255,.12)"></i>'; }).join(''); }
+  const px=simEl.querySelectorAll('.dvSimPx'); if(!px.length) return;
   const note=document.getElementById('dvRingSimNote');
   const L=DIAG.led, R=DIAG.ringPwr, now=Date.now();
   const railOff=R && R.pin<=10 && !R.on;
@@ -3760,10 +3805,13 @@ function _dvRingSimTick(){
     switch(L.mode){
       case 1: c=scale(cols[0],bf); break;                                        // solid
       case 2: { const t=now%(n*2400), j=Math.floor(t/2400); c=scale(blend(cols[j],cols[(j+1)%n],(t%2400)/2400),bf); break; }  // gradient
-      case 3: c=scale(wheel(Math.floor(now/12)+i*256/14),bf); break;             // rainbow
-      case 4: { const step=Math.floor(now/70), head=step%14, d=(head-i+14)%14;   // spin
-                c=d<3?scale(scale(cols[Math.floor(step/14)%n],bf),1-d*0.35):0; break; }
+      case 3: c=scale(wheel(Math.floor(now/12)+i*256/N),bf); break;              // rainbow
+      case 4: { const step=Math.floor(now/70), head=step%N, d=(head-i+N)%N;      // spin
+                c=d<3?scale(scale(cols[Math.floor(step/N)%n],bf),1-d*0.35):0; break; }
       case 5: c=(now%900)<200?scale(cols[Math.floor(now/900)%n],bf):0; break;    // pulse
+      case 7:{ const t=now%(N*80+6000); if(t>=N*80){ c=0; break; }               // eco spin: one sweep, 6 s dark
+               const head=Math.floor(t/80)%N, d=(head-i+N)%N;
+               c=d<3?scale(scale(cols[0],bf),1-d*0.35):0; break; }
       default:{ const br=0.08+0.92*(Math.sin((now%2400)/2400*2*Math.PI-Math.PI/2)+1)/2;  // breathe
                 c=scale(cols[Math.floor(now/2400)%n],bf*br); } }
     setP(el,c,true); });
