@@ -437,12 +437,27 @@ static long hxReadRaw(uint8_t dout, uint8_t sck, uint16_t timeoutMs)
     delay(1);
   }
   long v = 0;
-  noInterrupts();
+  /* ONE clock pulse per critical section, not one per 25-pulse burst.
+   *
+   * The HX711 powers itself down if PD_SCK is left HIGH past ~60 us, which is
+   * why this whole read used to run with interrupts off. But on the nRF52 the
+   * SoftDevice must service its radio interrupts on time, and a full burst
+   * holds them off for ~150 us — long enough to miss connection events and, at
+   * worst, assert the stack. That is the BLE dropping mid-session.
+   *
+   * PD_SCK LOW has no maximum, so interrupts only need to be off for the HIGH
+   * half of each pulse — a few microseconds. The chip stays happy and the radio
+   * stays alive in the gaps.                                                   */
   for (int i = 0; i < 24; i++) {
+    noInterrupts();
     digitalWrite(sck, HIGH); delayMicroseconds(1);
-    v = (v << 1) | digitalRead(dout);
-    digitalWrite(sck, LOW);  delayMicroseconds(1);
+    int bit = digitalRead(dout);          /* HX711 presents the bit while HIGH */
+    digitalWrite(sck, LOW);
+    interrupts();
+    v = (v << 1) | bit;
+    delayMicroseconds(1);                 /* LOW half — interrupts welcome     */
   }
+  noInterrupts();                         /* 25th pulse sets gain 128, ch A    */
   digitalWrite(sck, HIGH); delayMicroseconds(1);
   digitalWrite(sck, LOW);
   interrupts();
