@@ -3125,14 +3125,28 @@ function refreshLive(){ commitWater(); checkUnexplained(); classifyAction(); wat
 // + resets the baseline). If the stable water level still drops with NO event to
 // explain it (leak, slow spill, an unflagged tip), we flag it as a "removal" so
 // the ledger always balances — the ORQA way is no unaccounted water.
+// v13: OFF for now — "water toss out" is withdrawn while the stillness-based sip
+// detection is under test. It was also RACING with it: the pod now needs 8 s of
+// stillness to confirm a sip, and this net's own guard was sinceEvt>8000, so any
+// sip over 40 ml got flagged "dropped" in the window before the pod could
+// explain it. Re-enable from the console with __setUnexplained(true).
+let UNEX_ENABLED = false;
+// Must stay comfortably longer than the pod's stillness window (settleMs, 8 s)
+// or the race returns the moment this is switched back on.
+const UNEX_EVENT_GRACE_MS = 20000;
+window.__setUnexplained=(on)=>{ UNEX_ENABLED=!!on; POD._unexBase=null; return UNEX_ENABLED; };
 function checkUnexplained(){
+  if(!UNEX_ENABLED){ POD._unexBase=null; return; }
   if(!POD.connected) return;
   if(POD.state==='OUT'){ POD._unexBase=null; return; }   // paused: held weight is not a leak
+  // Never judge while the pod is being handled or is mid-measurement. The loss is
+  // real but not yet explained — the pod is in the middle of deciding what it was.
+  if(POD.state==='SETTLE'||POD.state==='MOVE'||POD.state==='TILT') return;
   const ml=Math.round(POD.waterMl||0);                       // firmware VOL (already debounced by the pod) — avoids the app display-stabilizer's settle lag that could double-count a real sip
   if(POD._unexBase==null){ POD._unexBase=ml; return; }
   if(ml>=POD._unexBase-2){ POD._unexBase=ml; return; }       // rose or steady → re-base (nothing unaccounted)
   const drop=POD._unexBase-ml, sinceEvt=Date.now()-(POD._evtAt||0);
-  if(drop>=40 && POD.stable && sinceEvt>8000){ POD._unexBase=ml; logUnexplained(drop); }   // a settled, event-less loss (guard clears any sip/refill/dispose first)
+  if(drop>=40 && POD.stable && sinceEvt>UNEX_EVENT_GRACE_MS){ POD._unexBase=ml; logUnexplained(drop); }   // a settled, event-less loss (guard clears any sip/refill/dispose first)
 }
 function logUnexplained(ml){ ml=Math.round(+ml); if(!Number.isFinite(ml)||ml<=0) return; POD.disposes++; POD.disposeMl=(POD.disposeMl||0)+ml; HS.wasted+=ml;
   if(POD._sync) POD._sync.wasted+=ml;   // app-side flag with NO pod event — shift the sync anchor or the counter-sync would revert it
