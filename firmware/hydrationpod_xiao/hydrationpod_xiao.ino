@@ -1705,6 +1705,9 @@ static void imuTick()
   static uint32_t lastWinWeigh = 0;
   static float    winSum      = 0;
   static uint16_t winN        = 0;
+  static float    winMin = 0, winMax = 0;  /* spread across the window = how
+                                            * settled it really was; the app
+                                            * scores sip confidence from it   */
   uint32_t now = millis();
 
   /* stillness: tilt not changing AND the accelerometer sitting at ~1 g. The
@@ -1737,6 +1740,8 @@ static void imuTick()
     if (r != LONG_MIN) {
       float g = (float)(r - hxTare) / hxScale; if (g < 0) g = 0;
       lastNetMl = g; winSum += g; winN++;
+      if (winN == 1) { winMin = winMax = g; }
+      else { if (g < winMin) winMin = g; if (g > winMax) winMax = g; }
     }
     if (psActive) hxSleep();
   }
@@ -1747,7 +1752,9 @@ static void imuTick()
   }
 
   /* ---- the window completed: this reading is trustworthy ---- */
-  float avg = winN ? (winSum / winN) : lastNetMl;
+  float avg    = winN ? (winSum / winN) : lastNetMl;
+  float spread = winN ? (winMax - winMin) : -1.0f; /* settle quality           */
+  uint16_t nSamp = winN;
   stillSince = now; winSum = 0; winN = 0;          /* re-arm the next window   */
 
   if (!baseValid) {                                /* first ever reading       */
@@ -1763,9 +1770,9 @@ static void imuTick()
   float delta = preTiltMl - avg;                   /* + = went down = drunk    */
   const char* verdict = (delta >= sipMinMl && delta <= SIP_MAX_ML) ? "SIP"
                       : (delta <= -REFILL_MIN_ML)                  ? "REFILL" : "NONE";
-  char why[110];
-  snprintf(why, sizeof why, "EVT|DECIDE:%s|PRE:%d|POST:%d|D:%d|N:%u|WIN:%lu%s",
-           verdict, (int)preTiltMl, (int)avg, (int)delta, winN,
+  char why[130];
+  snprintf(why, sizeof why, "EVT|DECIDE:%s|PRE:%d|POST:%d|D:%d|N:%u|SD:%.1f|WIN:%lu%s",
+           verdict, (int)preTiltMl, (int)avg, (int)delta, nSamp, spread,
            (unsigned long)settleMs,
            strcmp(verdict, "NONE") ? "" : (delta > SIP_MAX_ML ? "|WHY:HUGE" : "|WHY:TINY"));
   sendEvt(why);
