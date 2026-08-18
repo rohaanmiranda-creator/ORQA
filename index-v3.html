@@ -258,18 +258,28 @@
 
     <div class="card">
       <div class="lbl">LED CONTROL</div>
-      <div class="note">Writes GLOW to the pod. The ring is driven live — this is control, not detection.</div>
+      <div class="note">Mode and brightness are written with LEDMODE and BRIGHT — both persist on the pod
+        and survive a reboot. SHOW is momentary and leaves the standing mode alone.</div>
       <div class="row" style="margin-bottom:12px">
         <div id="ledSw" style="display:flex;flex-wrap:wrap;gap:7px"></div>
       </div>
-      <label class="flbl">BRIGHTNESS</label>
+      <label class="flbl">BRIGHTNESS · <span id="ledBriV">60%</span></label>
       <input type="range" id="ledBri" min="5" max="100" value="60">
-      <div class="seg" style="margin-top:12px">
-        <button data-glow="off">OFF</button>
-        <button data-glow="on" class="on">SOLID</button>
-        <button data-glow="auto">AUTO</button>
-        <button data-glow="show">SHOW</button>
+      <label class="flbl">MODE</label>
+      <div class="seg">
+        <button data-mode="OFF">OFF</button>
+        <button data-mode="SOLID">SOLID</button>
+        <button data-mode="SPIN">SPIN</button>
+        <button data-mode="RAINBOW">RAINBOW</button>
       </div>
+      <div class="seg" style="margin-top:6px">
+        <button data-mode="BREATHE">BREATHE</button>
+        <button data-mode="PULSE">PULSE</button>
+        <button data-mode="GRADIENT">GRADIENT</button>
+        <button data-mode="ECOSPIN">ECOSPIN</button>
+      </div>
+      <div class="note" id="ledNote" style="margin:10px 0 0"></div>
+      <button class="btn" id="btnShow">SHOW · 8 S TEST BURST</button>
     </div>
 
     <div class="card">
@@ -642,9 +652,15 @@ function onD1(o){
   if(o.PS) POD.ps=String(o.PS).split('/').map(Number);
   renderCal(); renderDev(); renderSubs();
 }
+const PMODES=['OFF','SOLID','GRADIENT','RAINBOW','SPIN','PULSE','BREATHE','ECOSPIN'];
 function onD2(o){
   POD.ma=num(o.MA,POD.ma); POD.cap=num(o.CAP,POD.cap);
   if(o.PW) POD.pw=String(o.PW).split('/').map(Number);
+  /* mirror the pod's real LED state — LED: is the PMode index, LB: is brightness */
+  const m=num(o.LED,null), lb=num(o.LB,null);
+  if(m!=null && PMODES[m] && typeof ledSyncUI==='function'){ ledMode=PMODES[m]; ledSyncUI(); }
+  if(lb!=null){ const el=$('ledBri'); if(el && document.activeElement!==el){ el.value=lb;
+    const v=$('ledBriV'); if(v) v.textContent=Math.round(lb)+'%'; } }
   const win=num(o.SST,null), min=num(o.SML,null);
   if(win!=null){ POD.cfg.win=win; const el=$('setWin'); if(el&&document.activeElement!==el) el.value=Math.round(win/1000); }
   if(min!=null){ POD.cfg.min=min; const el=$('setMin'); if(el&&document.activeElement!==el) el.value=min; }
@@ -933,21 +949,38 @@ const LEDPAL=['oklch(74% 0.11 226)','oklch(65% 0.19 25)','oklch(78% 0.15 55)','o
   'oklch(74% 0.15 150)','oklch(75% 0.13 178)','oklch(70% 0.15 260)','oklch(72% 0.15 300)',
   'oklch(72% 0.16 330)','oklch(90% 0.01 230)'];
 const LEDHEX=['46e0d2','ff5a5a','ff8f3f','ffc65a','4ade80','2dd4bf','6366f1','a855f7','ec4899','e8f4f8'];
-let ledCol=0;
+let ledCol=0, ledMode='SOLID';
+/* What each mode actually does on the ring, so the row is not four opaque words. */
+const MODEDESC={
+  OFF:'Ring dark. The pod keeps measuring.',
+  SOLID:'One steady colour.',
+  SPIN:'A 3-pixel arc chases round the ring, ~70 ms a step, fading behind the head.',
+  RAINBOW:'Hue wheel spread around the ring, spatial rather than timed.',
+  BREATHE:'Slow swell in and out; the colour advances each cycle.',
+  PULSE:'Sharper rise and fall than breathe.',
+  GRADIENT:'Blends between the selected colours around the ring.',
+  ECOSPIN:'Power-saver spin — one sweep, then the ring goes fully dark for ~6 s. Much cheaper than SPIN.',
+};
 $('ledSw').innerHTML=LEDPAL.map((c,i)=>`<button data-led="${i}" style="width:22px;height:22px;border-radius:11px;`
   +`background:${c};border:1px solid oklch(95% 0.01 230 / ${i===0?'0.6':'0.2'});cursor:pointer;padding:0"></button>`).join('');
-function ledApply(){ const b=Math.round(+$('ledBri').value);
-  const hex=LEDHEX[ledCol]; if(cmd('GLOW:0x'+hex)) toast('GLOW #'+hex.toUpperCase()+' · '+b+'%'); }
+function ledSyncUI(){
+  document.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('on',x.dataset.mode===ledMode));
+  $('ledNote').textContent=MODEDESC[ledMode]||'';
+  $('ledBriV').textContent=Math.round(+$('ledBri').value)+'%';
+}
+/* LEDMODE carries the colour, so re-send it when the swatch changes. */
+function ledApply(){ if(cmd('LEDMODE:'+ledMode+(ledMode==='OFF'?'':':'+LEDHEX[ledCol]))) toast('LED '+ledMode); }
 $('ledSw').querySelectorAll('[data-led]').forEach(b=>b.onclick=()=>{ ledCol=+b.dataset.led;
   $('ledSw').querySelectorAll('[data-led]').forEach((x,i)=>
     x.style.borderColor='oklch(95% 0.01 230 / '+(i===ledCol?'0.6':'0.2')+')');
-  ledApply(); });
-$('ledBri').onchange=ledApply;
-document.querySelectorAll('[data-glow]').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('[data-glow]').forEach(x=>x.classList.toggle('on',x===b));
-  const m=b.dataset.glow;
-  if(m==='off') cmd('GLOW:OFF'); else if(m==='auto') cmd('GLOW:AUTO');
-  else if(m==='show') cmd('SHOW'); else ledApply(); });
+  if(ledMode!=='OFF') ledApply(); });
+$('ledBri').oninput=()=>{ $('ledBriV').textContent=Math.round(+$('ledBri').value)+'%'; };
+$('ledBri').onchange=()=>{ const b=Math.round(+$('ledBri').value);
+  if(cmd('BRIGHT:'+b)) toast('BRIGHTNESS '+b+'%'); };
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
+  ledMode=b.dataset.mode; ledSyncUI(); ledApply(); });
+$('btnShow').onclick=()=>{ if(cmd('SHOW')) toast('SHOW — STANDING MODE UNTOUCHED'); };
+ledSyncUI();
 document.querySelectorAll('[data-ps]').forEach(b=>b.onclick=()=>{
   if(cmd('POWERSAVE:'+b.dataset.ps)) toast('POWER MODE '+b.dataset.ps); });
 
