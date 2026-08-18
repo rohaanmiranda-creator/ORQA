@@ -2317,6 +2317,9 @@ const POD = { connected:false, mock:false, weight:0, waterMl:0, sips:0, totalMl:
   ax:0, ay:0, az:0, state:'IDLE', battery:null, voltage:null, goalMl:null, pct:0, _mt:null, cmdChar:null, device:null,
   tareG:null,     // 2-point calibration, EMPTY point: raw gross reading of the empty bottle
   calFullG:null,  // 2-point calibration, FULL point: raw gross reading of the full bottle
+  calFp:null,     // the pod's tare/scale at the moment those points were captured — if the pod
+                  // is re-calibrated later, tareG/calFullG describe a scale that no longer exists
+  _calFpWarned:false,
   _battWarned:false, _battHist:[], charging:false, fastCharge:false, _chgNotified:false, _wasCharging:false, _connecting:false, _lastFrame:0 };
 // Net water the app trusts: when an app-side tare baseline exists, compute it from the raw gross
 // weight (W, grams ≈ mL) so tare works even if the pod firmware never zeroed. Otherwise fall back
@@ -2642,8 +2645,15 @@ function podEvt(str){ const parts=str.split('|'); if(parts[0]!=='EVT') return;
     case 'DFU':       notify('<span class="nic">⬆</span> Pod in update mode — flash from your Mac', '#9af0e6'); break;
     case 'DECIDE': devDecide(String(first.slice(ci+1)||'').toUpperCase(), o); break;   // v5: the sip engine explains each gesture verdict
     case 'CALW': { const sc=o.SC||'?'; DIAG.calRes={ g:v0||0, sc:sc, raw:o.RAW||null }; DIAG.scale=num(o.SC,DIAG.scale);
+      if(o.TARE!=null) DIAG.tare=num(o.TARE,DIAG.tare);
       notify('<span class="nic">⚖️</span> Pod scale calibrated — <b>'+sc+' counts/g</b> against '+(v0||'?')+' g. Verify in step 3.', '#3b82f6');
       if(typeof updateDevTab==='function') updateDevTab(); break; }   // v5 calibration test result
+    // v12: the pod's live calibration pair, and the zero it just stored
+    case 'CAL': { DIAG.tare=num(o.TARE,DIAG.tare); DIAG.scale=num(o.SC,DIAG.scale); DIAG.calDefault=(o.DEF==='1');
+      if(DIAG.calDefault) notify('<span class="nic">⚠️</span> Pod is running the <b>factory default</b> scale (420 counts/g) — not calibrated. Restore it with <b>Pin calibration</b> or run the weight test.', '#ffb45a');
+      if(typeof updateDevTab==='function') updateDevTab(); break; }
+    case 'TARE': { DIAG.tare=num(o.TARE,DIAG.tare);
+      if(typeof updateDevTab==='function') updateDevTab(); break; }
     case 'NAK': { const rej=String(first.slice(ci+1)||o.NAK||'command'); const k=rej.toUpperCase().split(':')[0];
       const w=_ackWaiters[k]; if(w){ clearTimeout(w.t); delete _ackWaiters[k]; w.res({acked:false, sent:true, nak:true}); }
       if(k==='DBG'){ DIAG.unsupported=true; if(typeof updateDevTab==='function') updateDevTab(); break; }   // pre-v5 firmware — Dev tab shows its own banner, no toast spam
@@ -2906,9 +2916,17 @@ window.__setStabConfirm=(n)=>{ STAB_CONFIRM=Math.max(2, n|0); waterStab.confirmN
 // App-side stillness backup: if the last handful of raw readings barely move, the bottle is
 // settled even if the firmware's STBL flag is unreliable. Guards against a stuck reading.
 let _wHist=[];
+let STILL_TOL = 6;              // g of spread across the window that still counts as "settled"
 function _appStill(){ const w=POD.weight; if(w==null) return false; _wHist.push(w); if(_wHist.length>8) _wHist.shift();
-  return _wHist.length>=5 && (Math.max(..._wHist)-Math.min(..._wHist)) <= 6; }   // ≤6 g spread over ~8 frames ≈ still
-function commitWater(){ const upright=(POD.tiltDeg||0)<TILT_MAX; const ok=(POD.stable || _appStill()) && upright;   // trust the scale only when still AND upright
+  return _wHist.length>=5 && (Math.max(..._wHist)-Math.min(..._wHist)) <= STILL_TOL; }   // spread over ~8 frames ≈ still
+window.__setStillTol=(g)=>{ STILL_TOL=Math.max(1, +g||6); return STILL_TOL; };
+// The IMU's STBL flag only says the bottle isn't MOVING (firmware: tilt changed <3° since the
+// last sample) — it says nothing about whether the WEIGHT has settled. These were OR'd, so an
+// IMU-still bottle passed the gate while the cell was still creeping or bouncing, and that
+// reading got published and captured as calibration. Both must now agree: not moving AND the
+// weight itself is steady. When they don't, feed(ok=false) holds the last trusted level, which
+// is the designed behaviour — it recovers by itself the moment the cell settles.
+function commitWater(){ const upright=(POD.tiltDeg||0)<TILT_MAX; const ok=POD.stable && _appStill() && upright;   // trust the scale only when still AND settled AND upright
   POD._stableMl=waterStab.feed(netWaterMl(), ok); POD._stableG=weightStab.feed(POD.weight||POD.waterMl||0, ok); return POD._stableMl; }
 window.__commitWater=commitWater;
 function stableWaterMl(){ return POD._stableMl!=null ? POD._stableMl : Math.round(POD.waterMl||0); }
@@ -2963,21 +2981,40 @@ function tareBottle(){
 window.__tareBottle=tareBottle;
 // 2-point calibration: capture the raw scale reading at EMPTY and at FULL. The difference in
 // weight is mapped straight to the bottle's capacity in ml, so sips read out in real ml.
+// One gate for every calibration capture — app-side points AND the pod-side CALW/TARE.
+// Upright, not moving, and the weight itself settled (see commitWater: STBL alone is an IMU
+// claim, not a scale claim).
+function calReady(){ return (POD.tiltDeg||0)<TILT_MAX && POD.stable && _appStill(); }
+window.__calReady=calReady;
+// The app's 2-point calibration is expressed in the pod's OWN units: POD.weight is W:, which
+// the firmware already derived through hxTare/hxScale. So if the pod is re-tared or
+// re-calibrated afterwards, tareG/calFullG silently describe a scale that no longer exists.
+// Stamp the pod's pair at capture time and compare on every diagnostic frame.
+function calStamp(){ if(DIAG.tare!=null && DIAG.scale) POD.calFp={ tare:DIAG.tare, scale:DIAG.scale }; }
+function calFpCheck(){
+  if(!POD.calFp || DIAG.tare==null || !DIAG.scale) return true;
+  const moved = Math.abs(DIAG.tare-POD.calFp.tare)>2 || Math.abs(DIAG.scale-POD.calFp.scale)>0.05;
+  if(moved && !POD._calFpWarned){ POD._calFpWarned=true;
+    notify('<span class="nic">⚠️</span> The pod was re-calibrated since this bottle was set up — the app\'s empty/full points no longer match. Tap <b>Clear</b> and set them again.', '#ffb45a'); }
+  if(!moved) POD._calFpWarned=false;
+  return !moved;
+}
 function calSet(which){
   if(!POD.connected){ toast('Connect the pod first'); return; }
-  const upright=(POD.tiltDeg||0)<TILT_MAX;
-  if(!(POD.stable && upright)){ toast('Hold the bottle upright & still, then tap again'); fxVibratePhone([0,60,50,60]); return; }
+  if(!calReady()){ toast('Hold the bottle upright & still, then tap again'); fxVibratePhone([0,60,50,60]); return; }
   const raw = Math.round((POD._stableG!=null ? POD._stableG : (POD.weight!=null ? POD.weight : (POD.waterMl||0))));   // use the settled weight
   if(which==='empty'){ POD.tareG=Math.round(raw);
     notify('<span class="nic">①</span> Empty calibrated at <b>'+Math.round(raw)+' g</b>. Now fill the bottle and tap “Set full”.', '#9fd9e6'); }
   else { POD.calFullG=Math.round(raw);
     const span=(POD.tareG!=null)?Math.round(raw-POD.tareG):null;
     notify('<span class="nic">②</span> Full calibrated at <b>'+Math.round(raw)+' g</b>'+(span!=null?' · span <b>'+span+' g</b> → '+HS.capacity+' ml':'')+'. Calibration complete.', '#46e0d2'); }
+  calStamp(); POD._calFpWarned=false;    // these points belong to the pod's CURRENT tare/scale
   waterStab.reset(); weightStab.reset(); POD._stableMl=null; POD._stableG=null;
   commitWater(); if(typeof refreshLive==='function') refreshLive(); if(typeof saveState==='function') saveState(); fxVibratePhone(40);
   if(typeof refreshDevPod==='function') refreshDevPod();
 }
-function calClear(){ POD.tareG=null; POD.calFullG=null; waterStab.reset(); weightStab.reset(); POD._stableMl=null;
+function calClear(){ POD.tareG=null; POD.calFullG=null; POD.calFp=null; POD._calFpWarned=false;
+  waterStab.reset(); weightStab.reset(); POD._stableMl=null;
   commitWater(); if(typeof refreshLive==='function') refreshLive(); if(typeof saveState==='function') saveState();
   toast('Calibration cleared'); if(typeof refreshDevPod==='function') refreshDevPod(); }
 window.__calSet=calSet; window.__calClear=calClear;
@@ -3182,7 +3219,7 @@ const DIAG={ have:false, lastD:0, unsupported:false, v:null,
   raw:null, tare:null, scale:null, cell:null, pins:null, slp:false, imu:null, hap:null,
   ps:[0,0], usb:false, chg:false, bot:true, up:0, hist:null,
   led:null, ma:null, pw:null, mas:null, cap:500, _lastReq:0, _iv:null, trace:[],
-  view:null, calRes:null, lastDR:0 };
+  view:null, calRes:null, lastDR:0, calDefault:false };
 const DEVDEC=[]; let _devDecV=0;
 const LEDMODES=['off','solid','gradient','rainbow','spin','pulse','breathe','ecospin'];
 const OVLNAMES=['none','app effect','reminder','find-my-pod ring'];
@@ -3193,6 +3230,7 @@ function podDiag(str){ const o=_kv(str); DIAG.lastD=Date.now(); DIAG.have=true; 
     if(o.PS) DIAG.ps=o.PS.split('/').map(Number);
     DIAG.usb=o.USB==='1'; DIAG.chg=o.CHG==='1'; DIAG.bot=o.BOT!=='0'; DIAG.up=num(o.UP,DIAG.up);
     if(o.HS) DIAG.hist=o.HS; if(o.VER) DIAG.v=o.VER;
+    if(typeof calFpCheck==='function') calFpCheck();   // pod re-calibrated behind the app's back?
   } else if(str.slice(0,3)==='D2|'){
     DIAG.led={ mode:num(o.LED,0), n:num(o.LN,1), cols:(o.LC||'').split('-').filter(Boolean),
       bright:num(o.LB,55), saver:o.LS==='1', ovl:num(o.OVL,0), remC:o.RL||'000000', remM:num(o.RM,0) };
@@ -3284,6 +3322,17 @@ const DVSECTIONS=[
   { k:'updates',ic:'📝', t:'Update log',              s:'what changed — app + firmware' } ];
 // hand-curated: every meaningful change to the app and the pod firmware, newest first
 const DEVCHANGELOG=[
+  { d:'18 Aug', rows:[
+    ['fw','TARE and CALW now WAIT for the cell to settle (3 consecutive medians of 24 agreeing within 0.5 g) before storing — creep during placement can no longer be baked into the scale factor. They NAK instead of writing a bad number.'],
+    ['fw','CALW refuses to run with less than 20 g actually on the cell (the old guard was 50 counts ≈ 0.12 g) and rejects any resulting scale outside 20–20000 counts/g'],
+    ['fw','CAL — new command. “CAL” reports the live pair; “CAL:<tare>:<scale>” pins a known-good calibration directly, no reference mass. This is the restore path after a chip erase wipes /pod.cfg.'],
+    ['fw','The load-cell absent-detector is muted while a calibration samples — placing and removing a reference mass can no longer latch the cell ABSENT mid-measurement and silently switch to simulated volume'],
+    ['fw','VOLD: on the live frame — volume at 0.1 g, alongside the integer VOL:, so calibration verification is not limited by 1 g quantisation'],
+    ['app','Weight readings are trusted only when the bottle is BOTH not moving AND the weight itself has settled. These were OR-ed, so the IMU’s “not moving” flag alone let an unsettled reading through — including into calibration captures.'],
+    ['app','The pod-side Calibrate and Tare buttons now apply the same upright-and-still gate the app-side 2-point capture already used'],
+    ['app','Pin calibration — read the pod’s live tare/scale, or write a known pair straight back after a reflash'],
+    ['app','The app’s 2-point points are stamped with the pod scale they were captured against; if the pod is re-calibrated behind the app’s back, it says so instead of silently reporting wrong ml'],
+    ['app','A pod running the factory-default 420 counts/g is now called out as NOT calibrated, rather than shown as a normal value'] ]},
   { d:'9 Aug · late', rows:[
     ['fw','Board draw truly drops when idle — the 5 ms fast pace engages only while light/haptics run; a bare BLE link paces at 20 ms, and the live Board figure now reads 2.2 mA whenever that is true'],
     ['fw','Battery % no longer cliffs on unplug — the full-charge anchor glides down at the real drain rate until the voltage curve takes over'],
@@ -3375,6 +3424,12 @@ function _dvSubHTML(v){
     <div class="dvStep"><span class="n">2</span><div class="sx"><b>Place a known weight</b> and enter its grams (water: 1 ml = 1 g)<div class="ss">reference <input id="dvCalRef" class="dvCapIn" type="number" min="20" max="5000" value="200"> g</div></div><span class="evJoin" id="dvCalGo">Calibrate</span></div>
     <div class="dvStep"><span class="n">3</span><div class="sx"><b>Verify accuracy</b> — keep (or re-place) the weight; within ±3 % is good<div class="ss" id="dvCalVer">waiting for a live reading…</div></div></div>
     <div class="calStat" id="dvCalScale">—</div>
+    <div class="lbl" style="margin-top:16px">PIN CALIBRATION · restore a known pair</div>
+    <div class="bsub">a full chip erase or bootloader reflash wipes <b>/pod.cfg</b> and the pod silently falls back to the factory 420 counts/g. Write a known-good pair straight back — no reference mass needed.</div>
+    <div class="dvStep"><span class="n">✓</span><div class="sx"><b>tare</b> <input id="dvPinTare" class="dvCapIn" type="number" step="1" placeholder="counts"> · <b>scale</b> <input id="dvPinScale" class="dvCapIn" type="number" step="0.01" placeholder="counts/g"><div class="ss" id="dvPinNow">— tap Read to load the pod's live pair</div></div><span class="evJoin" id="dvPinRead">Read</span></div>
+    <div class="dpBtns">
+      <button class="devBtn" id="dvPinSet">Pin to pod</button>
+    </div>
     <div class="lbl" style="margin-top:16px">APP-SIDE 2-POINT CALIBRATION</div>
     <div class="bsub">independent of the pod: maps gross grams empty → full = ${HS.capacity} ml in the app only</div>
     <div class="calStat" id="dvCalStat">not calibrated</div>
@@ -3561,10 +3616,31 @@ function _dvWire(v){
     { const f=$d('dvCalF'); if(f) f.onclick=()=>{ if(typeof calSet==='function') calSet('full'); updateDevTab(); }; }
     { const c=$d('dvCalC'); if(c) c.onclick=()=>{ if(typeof calClear==='function') calClear(); updateDevTab(); }; }
     { const hp=$d('dvHxProbe'); if(hp) hp.onclick=()=>{ if(podCommand('HXPROBE')) toast('Probing for the load cell… (~3 s)'); else toast('Connect the pod first'); }; }
-    { const t=$d('dvCalTare'); if(t) t.onclick=()=>{ if(podCommand('TARE')) toast('Taring — keep the cell empty and still'); else toast('Connect the pod first'); }; }
+    { const t=$d('dvCalTare'); if(t) t.onclick=()=>{
+        if(!POD.connected){ toast('Connect the pod first'); return; }
+        if(!calReady()){ toast('Hold it upright & still, then tap again'); fxVibratePhone([0,60,50,60]); return; }
+        if(podCommand('TARE')) toast('Taring — keep the cell empty and still'); }; }
     { const g=$d('dvCalGo'); if(g) g.onclick=()=>{ const ref=Math.round(+$d('dvCalRef').value);
         if(!(ref>=20 && ref<=5000)){ toast('Reference must be 20–5000 g'); return; }
-        if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); else toast('Connect the pod first'); }; }
+        if(!POD.connected){ toast('Connect the pod first'); return; }
+        // same gate calSet() applies to the app-side points — the pod-side factor is the
+        // number that multiplies every future reading, so it earns at least as much rigour
+        if(!calReady()){ toast('Hold it upright & still, then tap again'); fxVibratePhone([0,60,50,60]); return; }
+        if(podCommand('CALW:'+ref)) toast('Calibrating against '+ref+' g — keep it still'); }; }
+    // Pin calibration — read the pod's live pair, or write a known one back after an erase
+    { const r=$d('dvPinRead'); if(r) r.onclick=()=>{
+        if(!podCommand('CAL')){ toast('Connect the pod first'); return; }
+        setTimeout(()=>{ const t=$d('dvPinTare'), s=$d('dvPinScale');
+          if(t && DIAG.tare!=null) t.value=Math.round(DIAG.tare);
+          if(s && DIAG.scale)      s.value=DIAG.scale.toFixed(2);
+          if(typeof updateDevTab==='function') updateDevTab(); }, 400);
+        toast('Reading the pod\'s calibration…'); }; }
+    { const p=$d('dvPinSet'); if(p) p.onclick=()=>{
+        const t=$d('dvPinTare'), s=$d('dvPinScale');
+        const tv=t?Math.round(+t.value):NaN, sv=s?+s.value:NaN;
+        if(!isFinite(tv) || !isFinite(sv) || !(sv>=20 && sv<=20000)){ toast('Enter a tare and a scale between 20 and 20000 counts/g'); return; }
+        if(podCommand('CAL:'+tv+':'+sv.toFixed(2))) toast('Pinned tare '+tv+' · scale '+sv.toFixed(2)+' counts/g');
+        else toast('Connect the pod first'); }; }
     { const t=$d('dvCellTest'); if(t) t.onclick=()=>{
         const res=$d('dvCellTestRes'); if(!res) return;
         if(!POD.connected || Date.now()-DIAG.lastDR>3000){ res.style.display=''; res.className='calStat half';
@@ -3690,13 +3766,17 @@ function updateDevTab(){ if(activeTab!=='development') return;
       const t=off?'✓ Re-enable load cell':'⊘ Switch load cell OFF'; if(b.textContent!==t) b.textContent=t; } }
   set('dvTare', DIAG.tare!=null?Math.round(DIAG.tare).toLocaleString():'—');
   set('dvFull', DIAG.tare!=null&&DIAG.scale?Math.round(DIAG.tare+DIAG.scale*HS.capacity).toLocaleString():'—');
-  set('dvScale', DIAG.scale?DIAG.scale.toFixed(1):'—');
+  set('dvScale', DIAG.scale?DIAG.scale.toFixed(2):'—');
   set('dvNet', POD.connected?Math.round(POD.waterMl||0)+' ml':'—');
+  { const pn=$d('dvPinNow'); if(pn) pn.innerHTML = (DIAG.tare!=null&&DIAG.scale)
+      ? ('pod now: tare <b>'+Math.round(DIAG.tare).toLocaleString()+'</b> · scale <b>'+DIAG.scale.toFixed(2)+'</b> counts/g'
+         + (DIAG.scale===420?' — <b style="color:#ffb45a">factory default, not calibrated</b>':''))
+      : '— tap Read to load the pod\'s live pair'; }
   if(DIAG.raw!=null&&DIAG.tare!=null)
     set('dvCalS1','tare <b>'+Math.round(DIAG.tare).toLocaleString()+'</b> · raw now '+Math.round(DIAG.raw).toLocaleString()+' (Δ '+Math.round(DIAG.raw-DIAG.tare).toLocaleString()+' counts)');
   { const cs=$d('dvCalScale'); if(cs){ let h,c;
       if(DIAG.calRes){ h='✓ calibrated against <b>'+DIAG.calRes.g+' g</b> → <b>'+DIAG.calRes.sc+' counts/g</b> — verify in step 3'; c='calStat ok'; }
-      else if(DIAG.scale){ h='scale <b>'+DIAG.scale.toFixed(1)+' counts/g</b>'+(DIAG.scale===420?' (factory default — run the test)':' (persisted on the pod)'); c='calStat'; }
+      else if(DIAG.scale){ h='scale <b>'+DIAG.scale.toFixed(2)+' counts/g</b>'+(DIAG.scale===420?' (factory default — not calibrated, run the test or pin a known pair)':' (persisted on the pod)'); c=DIAG.scale===420?'calStat half':'calStat'; }
       else { h='—'; c='calStat'; }
       if(cs.innerHTML!==h) cs.innerHTML=h; cs.className=c; } }
   { const ver=$d('dvCalVer');   // slow-path verify (D1 1 Hz) — the DR stream overwrites at ~7 Hz
@@ -4099,6 +4179,7 @@ function _persistNow(){ try{
     rem:{ ...REM },
     led:{ ...LED, cols:LED.cols.slice() },
     tareG:(POD.tareG==null?null:POD.tareG), calFullG:(POD.calFullG==null?null:POD.calFullG),
+    calFp:(POD.calFp||null),                 // pod tare/scale those points were captured against
     lastSipSeq:(POD._lastSipSeq==null?null:POD._lastSipSeq),
     sips:SIPLOG.slice(0,200).map(e=>({ ...e, t:+new Date(e.t) })),
     refills:REFILLLOG.slice(0,100).map(e=>({ ...e, t:+new Date(e.t) })),
@@ -4122,6 +4203,7 @@ function loadPersisted(reset){ try{
   if(s.led){ Object.assign(LED, s.led); if(!Array.isArray(LED.cols)||!LED.cols.length) LED.cols=['46e0d2']; }
   if(s.tareG!==undefined && s.tareG!==null) POD.tareG=s.tareG;   // keep the calibration across reloads
   if(s.calFullG!==undefined && s.calFullG!==null) POD.calFullG=s.calFullG;
+  if(s.calFp) POD.calFp=s.calFp;                                 // …and what pod scale they assumed
   if(s.date!==_stDate){                              // app last ran on a previous day → archive it, start today fresh
     archiveDay(s.date, h, (s.sips||[]).length);
     HS.streak=((h.intake||0)>=(h.goal||HS.goal)) ? (h.streak||0)+1 : 0;
