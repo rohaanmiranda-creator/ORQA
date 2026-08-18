@@ -73,7 +73,13 @@ using namespace Adafruit_LittleFS_Namespace;
 /* ------------------------------------------------------------------ config -- */
 #define HAS_ONBOARD_IMU   1
 #define BOTTLE_CAPACITY_ML  600
-#define BOTTLE_TARE_G       180
+#define BOTTLE_TARE_G_DEF   180   /* fallback only — see bottleTareG below       */
+/* The empty bottle's own weight. This used to be a hard #define, which meant the
+ * gross weight the pod reported was (180 + water) whatever bottle was actually
+ * on it — and the app's "set empty" capture just read that constant straight
+ * back. It is a real, measured, per-bottle number, so it is settable and
+ * persisted: BOTTLEW:<grams> over BLE, 'bottlew <g>' on serial.               */
+static uint16_t bottleTareG = BOTTLE_TARE_G_DEF;
 #define LIVE_PERIOD_MS     1000
 #define IMU_PERIOD_MS        50
 #define RING_COUNT           14
@@ -123,7 +129,25 @@ static bool     chgNow = false;
 static uint8_t  chg100 = 0;                   /* 1 = HICHG active → 100 mA charge (CHGCUR:) */
 
 #define PS_WEIGH_PERIOD_MS 60000   /* powersave: periodic weigh cadence          */
-#define HX_SETTLE_MS         450   /* HX711 wake-from-powerdown settle           */
+#define HX_SETTLE_MS         450   /* HX711 chip start-up after power-down        */
+
+/* ------------------------------------------------ cell wake / warm-up ------
+ * Waking the HX711 re-excites the bridge, and the BRIDGE needs far longer than
+ * the chip does before its output means anything. Reading 450 ms after wake is
+ * what made the reading alternate between two values on battery: power save
+ * slept the cell between weighs, so every weigh landed part-way through a
+ * settling transient, and the tare was taken on one of those.
+ *
+ * Power save is kept — it is worth real battery life. What changes is honesty:
+ *   - a woken cell is WARMING for CELL_WARMUP_MS and nothing trusts it yet
+ *   - the live frame says which of live / asleep / warming it is, so the app
+ *     can show "cell asleep" instead of a stale number dressed up as current
+ *   - anything that needs real numbers HOLDS the cell awake: calibration does
+ *     it automatically, and WAKE:<seconds> does it on demand                  */
+#define CELL_WARMUP_MS      2500   /* bridge settle before a reading is trusted   */
+#define CELL_HOLD_DEF_S       60   /* WAKE with no argument                       */
+#define CELL_HOLD_MAX_S      900
+#define CELL_HOLD_CAL_S      180   /* auto-hold across a calibration              */
 
 /* ------------------------------------------------- load-cell calibration ---
  * CAL_DEFAULT_* are the FALLBACK pair, used only when /pod.cfg is missing —
@@ -216,6 +240,8 @@ static long   hxLastRaw = LONG_MIN;   /* newest good raw average, for diagnostic
 static float  lastNetMl = 0;
 static float  preTiltMl = 0;
 static bool   hxSleeping = false;     /* powersave: PD_SCK held high              */
+static uint32_t cellHoldUntil = 0;    /* millis: never sleep while now < this     */
+static uint32_t cellReadyAt   = 0;    /* millis: readings before this are warming */
 
 /* ---- DA7280 haptic ---- */
 static bool     hapFound = false;
@@ -417,14 +443,43 @@ static void hxWake()
   if (!hxFound || !hxSleeping) return;
   digitalWrite(hxSck, LOW);             /* leave power-down                      */
   hxSleeping = false;
-  delay(HX_SETTLE_MS);                  /* first conversion after wake           */
+  delay(HX_SETTLE_MS);                  /* chip start-up                         */
+  cellReadyAt = millis() + CELL_WARMUP_MS;   /* bridge is still settling          */
 }
 
 static void hxSleep()
 {
   if (!hxFound || hxSleeping) return;
+  if (millis() < cellHoldUntil) return; /* held awake — one guard covers every
+                                         * caller, so nothing can power-cycle
+                                         * the cell during a measurement        */
   digitalWrite(hxSck, HIGH);            /* PD_SCK high >60 us = power-down       */
   hxSleeping = true;
+}
+
+/* 0 = live and trustworthy, 1 = asleep, 2 = awake but still warming          */
+static uint8_t cellStateCode()
+{
+  if (!hxFound || hxSleeping) return 1;
+  return (millis() < cellReadyAt) ? 2 : 0;
+}
+static bool cellLive() { return cellStateCode() == 0; }
+static uint32_t cellHoldLeftS()
+{ uint32_t n = millis(); return (n < cellHoldUntil) ? (cellHoldUntil - n + 999) / 1000 : 0; }
+/* hold the cell awake for secs (0 releases the hold immediately)             */
+static void cellHold(uint32_t secs)
+{
+  if (!secs) { cellHoldUntil = 0; return; }
+  if (secs > CELL_HOLD_MAX_S) secs = CELL_HOLD_MAX_S;
+  cellHoldUntil = millis() + secs * 1000UL;
+  hxWake();
+}
+/* block until the warm-up window has passed — only ever called from explicit
+ * user actions (calibration), never from the live path                       */
+static void cellAwaitWarm()
+{
+  hxWake();
+  while (millis() < cellReadyAt) delay(10);
 }
 
 static long hxReadRaw(uint8_t dout, uint8_t sck, uint16_t timeoutMs)
@@ -590,7 +645,8 @@ static float netMl()
 {
   if (!hxFound) return simVolMl;
   if (!bottleIn) return lastNetMl;      /* paused: hold the last known reading   */
-  if (hxSleeping) return lastNetMl;     /* powersave: no fresh weigh this frame  */
+  if (hxSleeping) return lastNetMl;     /* asleep: hold the last known level     */
+  if (millis() < cellReadyAt) return lastNetMl;   /* warming: not yet trustworthy */
   long r = hxRead3(hxDout, hxSck);
   if (r != LONG_MIN) hxLastRaw = r;
   if (r == LONG_MIN) return lastNetMl;
@@ -1046,13 +1102,32 @@ struct PodCfgV11 { long tare; float scale; uint32_t goal; uint8_t rpin; char nam
                   uint32_t lastChargeEpoch; float drainPerHr;
                   uint8_t ringPwrPin, ringPwrAH; uint8_t chg100; uint8_t ringUnfit;
                   uint8_t cellOff; uint8_t ringN; uint16_t _pad8; };
+/* v15: adds the measured empty-bottle weight. Older configs still load — the
+ * size check below accepts every historical layout and only reads fields the
+ * saved struct was actually big enough to contain.                            */
+struct PodCfgV12 { long tare; float scale; uint32_t goal; uint8_t rpin; char name[28];
+                  uint32_t sips, totMl, refills, refillMl, disposes, disposeMl, sipSeq;
+                  uint8_t ledMode; uint32_t glowRGB; uint32_t animCols[6]; uint8_t animN;
+                  uint8_t psMode; uint8_t hapStrength; uint8_t bottleOut; uint8_t hapOff;
+                  uint8_t ecoLight; uint8_t remSmart; uint8_t remStyle; uint8_t _pad;
+                  uint16_t remMins; uint16_t remFrom; uint16_t remTo; uint16_t _pad2;
+                  uint32_t remLight; uint32_t epochSaved; uint32_t histSynced;
+                  uint8_t bright; uint8_t lightSaver; uint8_t remLMode; uint8_t _pad3;
+                  uint16_t battCap; uint16_t _pad4;
+                  uint16_t sipTilt, sipMinMs, sipMaxMs, settleMs;
+                  uint8_t sipMinMl, sipFxOn, sipFxPat, sipFxAmp;
+                  uint32_t sipFxCol; uint16_t sipFxMs; uint16_t _pad5;
+                  uint32_t lastChargeEpoch; float drainPerHr;
+                  uint8_t ringPwrPin, ringPwrAH; uint8_t chg100; uint8_t ringUnfit;
+                  uint8_t cellOff; uint8_t ringN; uint16_t _pad8;
+                  uint16_t bottleTareG; uint16_t _pad9; };
 
 static void cfgLoad()
 {
   InternalFS.begin();
   File f(InternalFS);
   if (!f.open("/pod.cfg", FILE_O_READ)) return;
-  PodCfgV11 c = {};
+  PodCfgV12 c = {};
   int got = f.read((uint8_t*)&c, sizeof c);
   f.close();
   if (got != (int)sizeof(PodCfgV1) && got != (int)sizeof(PodCfgV2) &&
@@ -1060,7 +1135,7 @@ static void cfgLoad()
       got != (int)sizeof(PodCfgV5) && got != (int)sizeof(PodCfgV6) &&
       got != (int)sizeof(PodCfgV7) && got != (int)sizeof(PodCfgV8) &&
       got != (int)sizeof(PodCfgV9) && got != (int)sizeof(PodCfgV10) &&
-      got != (int)sizeof(PodCfgV11)) return;
+      got != (int)sizeof(PodCfgV11) && got != (int)sizeof(PodCfgV12)) return;
 
   hxTare = c.tare;
   hxScale = (c.scale >= CAL_SCALE_MIN && c.scale <= CAL_SCALE_MAX) ? c.scale : CAL_DEFAULT_SCALE;
@@ -1140,6 +1215,9 @@ static void cfgLoad()
     bottleIn = !c.bottleOut;            /* a paused pod stays paused after reboot */
     if (!bottleIn) podState = "OUT";
   }
+  /* only present from V12 onward — older configs keep the default             */
+  if (got >= (int)sizeof(PodCfgV12) && c.bottleTareG >= 1 && c.bottleTareG <= 5000)
+    bottleTareG = c.bottleTareG;
 }
 
 static void cfgSave()
@@ -1148,9 +1226,9 @@ static void cfgSave()
   InternalFS.remove("/pod.cfg");
   if (f.open("/pod.cfg", FILE_O_WRITE)) {
     /* overlays never touch animCols/pMode any more — persist directly           */
-    PodCfgV11 c = {};
+    PodCfgV12 c = {};
     c.ringPwrPin = ringPwrPin; c.ringPwrAH = ringPwrAH; c.chg100 = chg100; c.ringUnfit = (uint8_t)(!ringFit);
-    c.cellOff = cellOff; c.ringN = ringN;
+    c.cellOff = cellOff; c.ringN = ringN; c.bottleTareG = bottleTareG;
     c.tare = hxTare; c.scale = hxScale; c.goal = goalMl; c.rpin = ringPin;
     c.sips = sips; c.totMl = totMl; c.refills = refills; c.refillMl = refillMl;
     c.disposes = disposes; c.disposeMl = disposeMl; c.sipSeq = sipSeq;
@@ -1430,12 +1508,12 @@ static void sendDiagFrames()
   const char* cellSt = !hxFound ? "NONE" : "OK";
   snprintf(f, sizeof f,
     "D1|RAW:%ld|TARE:%ld|SC:%.1f|CELL:%s|HX:%u/%u|SLP:%u|IMU:%u|HAP:%u"
-    "|PS:%u/%u|USB:%u|CHG:%u|BOT:%u|UP:%lu|HS:%lu/%lu|VER:6",
+    "|PS:%u/%u|USB:%u|CHG:%u|BOT:%u|UP:%lu|HS:%lu/%lu|BW:%u|VER:6",
     (hxLastRaw == LONG_MIN) ? 0 : hxLastRaw, hxTare, hxScale, cellSt, hxDout, hxSck,
     hxSleeping ? 1 : 0, imuOk ? 1 : 0, hapFound ? 1 : 0,
     psMode, psActive ? 1 : 0, usbPresent() ? 1 : 0, isCharging() ? 1 : 0,
     bottleIn ? 1 : 0, millis() / 1000,
-    (unsigned long)histSynced, (unsigned long)histCount);
+    (unsigned long)histSynced, (unsigned long)histCount, bottleTareG);
   chrLive.notify(f, strlen(f));
 
   PowerEst now;                         /* LIVE draw — what the hardware is doing THIS second */
@@ -1541,14 +1619,15 @@ static void sendLiveFrame()
   snprintf(f, sizeof f,
     "W:%d|VOL:%d|VOLD:%.1f|SIPS:%lu|TOT:%lu|REF:%lu|RTOT:%lu|DISP:%lu|DTOT:%lu"
     "|TILT:%d|STBL:%d|AX:%.2f|AY:%.2f|AZ:%.2f|ST:%s|GOAL:%lu|PCT:%lu"
-    "|BATT:%u|VBAT:%.2f|T:%02lu:%02lu:%02lu",
-    (int)(BOTTLE_TARE_G + vol), (int)vol, vol,
+    "|BATT:%u|VBAT:%.2f|CSLP:%u|CHOLD:%lu|T:%02lu:%02lu:%02lu",
+    (int)(bottleTareG + vol), (int)vol, vol,
     (unsigned long)sips, (unsigned long)totMl,
     (unsigned long)refills, (unsigned long)refillMl,
     (unsigned long)disposes, (unsigned long)disposeMl,
     (int)tiltDeg, stableFlag ? 1 : 0, ax, ay, az, podState,
     (unsigned long)goalMl, (unsigned long)pct,
     lastBattPct, vbat,                  /* battTick's value — includes the charger-done 100% clamp */
+    cellStateCode(), (unsigned long)cellHoldLeftS(),
     (unsigned long)hh, (unsigned long)mm, (unsigned long)ss);
 
   if (connected && chrLive.notifyEnabled()) {
@@ -1680,7 +1759,7 @@ static void imuTick()
 
   /* accumulate weighs across the window rather than taking one reading at the
    * end — the average is what the 8 s is FOR.                                 */
-  if (hxFound && (now - lastWinWeigh >= SIP_WIN_SAMPLE_MS)) {
+  if (cellLive() && (now - lastWinWeigh >= SIP_WIN_SAMPLE_MS)) {
     lastWinWeigh = now;
     hxWake();
     long r = hxRead3(hxDout, hxSck);
@@ -1836,6 +1915,8 @@ static void handleCommand(char* cmd)
   if (!strcmp(cmd, "TARE")) {
     if (hxFound) {
       calBusy = true;
+      cellHold(CELL_HOLD_CAL_S);        /* nothing may sleep it mid-calibration */
+      cellAwaitWarm();                  /* and the bridge must have settled     */
       long r = hxSettled();             /* wait for it to stop moving           */
       calBusy = false;
       if (r == LONG_MIN) {              /* never settled — keep the old zero    */
@@ -1917,6 +1998,8 @@ static void handleCommand(char* cmd)
     uint32_t g = arg ? strtoul(arg, nullptr, 10) : 0;
     if (!(g >= 20 && g <= 5000) || !hxFound) { sendNak("CALW"); return; }
     calBusy = true;
+    cellHold(CELL_HOLD_CAL_S);
+    cellAwaitWarm();
     long r = hxSettled();
     calBusy = false;
     if (r == LONG_MIN) {
@@ -1942,6 +2025,41 @@ static void handleCommand(char* cmd)
     snprintf(b, sizeof b, "EVT|CALW:%lu|SC:%.2f|RAW:%ld|TARE:%ld",
              (unsigned long)g, hxScale, r, hxTare);
     sendEvt(b);
+  }
+  else if (!strcmp(cmd, "BOTTLEW")) {
+    /* BOTTLEW:<grams> — the empty bottle's own weight, persisted. The pod adds
+     * it to the measured water to report gross weight; it is not a guess any
+     * more. BOTTLEW alone reports the current value.                          */
+    if (!arg) {
+      char b[48]; snprintf(b, sizeof b, "EVT|BOTTLEW:%u", bottleTareG);
+      sendEvt(b); sendAck("BOTTLEW"); return;
+    }
+    uint32_t g = strtoul(arg, nullptr, 10);
+    if (g >= 1 && g <= 5000) {
+      bottleTareG = (uint16_t)g; cfgSave(); sendAck("BOTTLEW");
+      char b[48]; snprintf(b, sizeof b, "EVT|BOTTLEW:%u", bottleTareG);
+      sendEvt(b);
+      Serial.print("Bottle weight set to "); Serial.print(bottleTareG); Serial.println(" g");
+    } else sendNak("BOTTLEW");
+  }
+  else if (!strcmp(cmd, "WAKE")) {
+    /* WAKE            — hold the cell awake for CELL_HOLD_DEF_S
+     * WAKE:<seconds>  — hold for that long (capped at CELL_HOLD_MAX_S)
+     * WAKE:0          — release the hold, power save may sleep it again
+     * Readings stay flagged as warming until the bridge has settled.          */
+    uint32_t secs = arg ? strtoul(arg, nullptr, 10) : CELL_HOLD_DEF_S;
+    if (arg && secs == 0) { cellHold(0); sendAck("WAKE"); sendEvt("EVT|WAKE|HOLD:0"); }
+    else {
+      if (secs > CELL_HOLD_MAX_S) secs = CELL_HOLD_MAX_S;
+      cellHold(secs);
+      sendAck("WAKE");
+      char b[56];
+      snprintf(b, sizeof b, "EVT|WAKE|HOLD:%lu|WARM:%lu",
+               (unsigned long)secs,
+               (unsigned long)((millis() < cellReadyAt) ? (cellReadyAt - millis()) : 0));
+      sendEvt(b);
+      Serial.print("Cell held awake for "); Serial.print(secs); Serial.println(" s");
+    }
   }
   else if (!strcmp(cmd, "CAL")) {
     /* CAL              — report the live pair as EVT|CAL:TARE:<t>:SC:<s>
@@ -2278,7 +2396,8 @@ static void serialTick()
     else if (!strncasecmp(line, "tare", 4)) {
       if (hxFound) {
         Serial.println("taring — hold still...");
-        calBusy = true; long r = hxSettled(); calBusy = false;
+        calBusy = true; cellHold(CELL_HOLD_CAL_S); cellAwaitWarm();
+        long r = hxSettled(); calBusy = false;
         if (r == LONG_MIN) Serial.println("reading never settled — zero unchanged");
         else { hxTare = r; cfgSave(); Serial.print("tared at raw "); Serial.println(hxTare); }
       }
@@ -2288,7 +2407,8 @@ static void serialTick()
       if (!hxFound) Serial.println("no live load cell");
       else if (v > 0) {
         Serial.println("calibrating — hold still...");
-        calBusy = true; long r = hxSettled(); calBusy = false;
+        calBusy = true; cellHold(CELL_HOLD_CAL_S); cellAwaitWarm();
+        long r = hxSettled(); calBusy = false;
         if (r == LONG_MIN) { Serial.println("reading never settled — scale unchanged"); }
         else {
           float onCell = fabsf((float)(r - hxTare)) / (hxScale > 1 ? hxScale : CAL_DEFAULT_SCALE);
@@ -2360,6 +2480,26 @@ static void serialTick()
       else Serial.println("clock not set (app sends SETTIME on connect)");
     }
     else if (!strncasecmp(line, "scan", 4)) { i2cScan(Wire, "external D4/D5"); i2cScan(Wire1, "internal"); }
+    else if (!strncasecmp(line, "bottlew", 7)) {
+      if (v >= 1 && v <= 5000) { bottleTareG = (uint16_t)v; cfgSave();
+        Serial.print("bottle weight = "); Serial.print(bottleTareG); Serial.println(" g"); }
+      else { Serial.print("bottle weight = "); Serial.print(bottleTareG);
+             Serial.println(" g   (usage: bottlew <1-5000>)"); }
+    }
+    else if (!strncasecmp(line, "wake", 4)) {
+      uint32_t secs = (v > 0) ? (uint32_t)v : CELL_HOLD_DEF_S;
+      if (v == 0 && sp) { cellHold(0); Serial.println("cell hold released"); }
+      else { cellHold(secs);
+        Serial.print("cell held awake "); Serial.print(secs);
+        Serial.print(" s (warming "); Serial.print(CELL_WARMUP_MS); Serial.println(" ms)"); }
+    }
+    else if (!strncasecmp(line, "cell", 4)) {
+      const char* st = cellStateCode() == 0 ? "LIVE" : cellStateCode() == 1 ? "ASLEEP" : "WARMING";
+      Serial.print("cell="); Serial.print(st);
+      Serial.print(" hold="); Serial.print(cellHoldLeftS()); Serial.print("s");
+      Serial.print(" ps="); Serial.print(psActive ? "active" : "off");
+      Serial.print(" raw="); Serial.println(hxLastRaw == LONG_MIN ? 0 : hxLastRaw);
+    }
     else if (!strncasecmp(line, "hxprobe", 7)) { hxFound = false; hxProbe(); }
     else if (!strncasecmp(line, "ringpin", 7)) {
       if (v >= 0 && v <= 10 && v != 4 && v != 5) {
@@ -2454,11 +2594,14 @@ static void serialTick()
       Serial.print(" name='");Serial.print(devName);
       Serial.print("' up="); Serial.print(millis() / 1000); Serial.println("s");
     }
-    else Serial.println("cmds: status blestat scan weigh tare calw cal hxprobe pinv hap happat hapcfg ps time ring ringpin setname sip add dispose goal day in out unsettled batt debug\n"
+    else Serial.println("cmds: status blestat scan weigh tare calw cal wake cell bottlew hxprobe pinv hap happat hapcfg ps time ring ringpin setname sip add dispose goal day in out unsettled batt debug\n"
                         "  tare              zero the cell (waits for it to settle)\n"
                         "  calw <grams>      set scale against a reference mass on the cell\n"
                         "  cal               print the live tare/scale pair\n"
-                        "  cal <tare> <sc>   pin a known calibration (restore after a chip erase)");
+                        "  cal <tare> <sc>   pin a known calibration (restore after a chip erase)\n"
+                        "  wake [secs]       hold the cell awake (default 60 s); 'wake 0' releases\n"
+                        "  cell              report cell state: LIVE / WARMING / ASLEEP + hold left\n"
+                        "  bottlew <grams>   the empty bottle's own weight (persisted)");
   }
 }
 
