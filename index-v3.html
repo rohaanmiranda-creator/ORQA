@@ -4,356 +4,490 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
-<title>ORQA Pod · Sip Engine</title>
+<title>LC1 Console · ORQA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!--
-  ORQA v3 — a deliberately small instrument for the sip engine.
+  LC1 Console — implementation of "LC1 Console.dc.html" from the Claude Design
+  project "Water Intake Tracking App" (359bba9d).
 
-  What this is NOT: index-v2.html. That build carries three.js, GLTF/FBX loaders
-  and ~2.5 MB of 3D models to render a bottle, plus reminders, LED animation
-  design, haptic pattern authoring and hardware-presence diagnostics. None of it
-  makes a sip measurement more accurate.
+  What came across: the visual language (oklch dark palette, Inter + JetBrains
+  Mono, 14px cards, mono section labels, stat grids, sparkline, 4-tab bottom nav
+  DASH/CAL/SIP/SET) and the screen structure.
 
-  This build keeps: the sip engine (log, score, correct, learn), the load-cell
-  calibration, battery/power telemetry, and the same account sign-in. Nothing
-  else. One file, no vendored libraries, no 3D.
+  What did NOT come across, deliberately:
+   - ios-frame.jsx — a preview bezel, status bar and home indicator. A real phone
+     draws its own; shipping a fake one would put a second status bar on screen.
+   - support.js — the Claude Design runtime (x-dc / x-import / mustache). The
+     design's bindings are re-expressed as plain DOM here.
+   - "TAP TO SIMULATE FAULT" and the simulated telemetry. Every number below is
+     read off the pod; where the pod cannot answer, the field says so.
 
-  Pod protocol (service 0x180D):
-    0x2A57 notify  live 1 Hz  W|VOL|VOLD|SIPS|TOT|...|TILT|STBL|ST|BATT|VBAT|T
-                   and the D1/D2/D3 diagnostic frames while DBG:1
-    0x2A58 notify  sip        N|ML|DUR|VOL
-    0x2A5A notify  events     EVT|DECIDE:...|PRE|POST|D|N|SD|WIN, EVT|CAL, ...
-    0x2A59 write   commands   TARE CALW CAL SIPCFG SETGOAL DBG RESTART ...
+  Pod protocol (service 0x180D): 0x2A57 live + D1/D2/D3 diagnostics,
+  0x2A58 sip, 0x2A5A events, 0x2A59 commands.
 -->
 <style>
   :root{
-    --bg:#071219; --bg2:#0b1a24; --card:#0e2230; --card2:#122a3a; --line:rgba(120,200,220,.14);
-    --ink:#eafcff; --dim:#9fd9e6; --dim2:#6f9dad; --accent:#46e0d2; --accent2:#3b82f6;
-    --warn:#ffb45a; --bad:#ff6b6b; --good:#4ade80; --r:14px;
+    --bg:oklch(13% 0.014 230); --bg2:oklch(15% 0.014 230); --card:oklch(18% 0.014 230);
+    --card2:oklch(21% 0.015 230); --pill:oklch(26% 0.016 230);
+    --line:oklch(95% 0.01 230 / 0.08); --line2:oklch(95% 0.01 230 / 0.15);
+    --ink:oklch(97% 0.006 230); --ink2:oklch(93% 0.006 230); --ink3:oklch(88% 0.006 230);
+    --mut:oklch(55% 0.014 230); --mut2:oklch(50% 0.014 230); --mut3:oklch(70% 0.014 230);
+    --acc:oklch(74% 0.11 226); --acc-dim:oklch(74% 0.11 226 / 0.18);
+    --ok:oklch(74% 0.15 150); --warn:oklch(80% 0.15 85); --bad:oklch(65% 0.19 25);
+    --teal:oklch(75% 0.13 178); --orange:oklch(78% 0.15 55);
+    --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',-apple-system,system-ui,sans-serif;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
-    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    font-size:15px;-webkit-font-smoothing:antialiased}
-  body{padding-bottom:env(safe-area-inset-bottom)}
-  h1,h2,h3{margin:0;font-weight:600}
-  button{font:inherit;cursor:pointer}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;font-size:15px}
+  body{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
+  button{outline:none;font-family:inherit;color:inherit}
+  input{outline:none;font-family:inherit}
+  @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.3}}
+  @keyframes blinkLed{0%,100%{opacity:1}50%{opacity:.15}}
 
-  /* ---- chrome ---- */
-  header{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:10px;
-    padding:12px 14px calc(12px + env(safe-area-inset-top)) 14px;padding-top:calc(12px + env(safe-area-inset-top));
-    background:linear-gradient(180deg,rgba(7,18,25,.98),rgba(7,18,25,.86));backdrop-filter:blur(10px);
-    border-bottom:1px solid var(--line)}
-  .brand{font-size:16px;letter-spacing:.3em;color:var(--ink)}
-  .grow{flex:1}
-  .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:11.5px;
-    border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--dim);white-space:nowrap}
-  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--dim2)}
-  .chip.on .dot{background:var(--good);box-shadow:0 0 8px var(--good)}
-  .chip.warn .dot{background:var(--warn)}
-  .chip.bad  .dot{background:var(--bad)}
+  /* ── header ── */
+  header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+    padding:calc(14px + env(safe-area-inset-top)) 16px 12px;border-bottom:1px solid var(--line);
+    background:var(--bg);position:sticky;top:0;z-index:20}
+  .hL{display:flex;align-items:center;gap:7px}
+  .hTag{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.02em;color:var(--ink)}
+  .hCur{width:6px;height:13px;background:var(--acc);opacity:.85;animation:pulseDot 1.2s steps(2) infinite;display:inline-block}
+  .hSub{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;color:var(--mut);margin-left:2px}
+  .podBtn{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid oklch(95% 0.01 230 / 0.1);
+    border-radius:8px;padding:6px 10px;cursor:pointer}
+  .podBtn span{font-family:var(--mono);font-size:11.5px;color:oklch(90% 0.006 230)}
+  .bars{display:flex;align-items:flex-end;gap:1.5px;height:13px}
+  .bars i{width:2.5px;border-radius:1px;display:block;background:var(--mut2)}
 
-  nav{display:flex;gap:6px;padding:10px 14px;position:sticky;top:0;z-index:30;background:var(--bg)}
-  nav button{flex:1;padding:10px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.03);
-    color:var(--dim);font-size:13px;letter-spacing:.05em}
-  nav button.sel{background:linear-gradient(135deg,rgba(70,224,210,.18),rgba(59,130,246,.12));
-    color:var(--ink);border-color:rgba(70,224,210,.4)}
-
-  main{padding:0 14px 40px;max-width:760px;margin:0 auto}
+  /* ── screens ── */
+  main{flex:1;overflow-y:auto;padding:16px 16px 24px;max-width:640px;width:100%;margin:0 auto}
   main[hidden]{display:none}
+  .stack{display:flex;flex-direction:column;gap:14px}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:0 0 12px}
-  .card h2{font-size:12px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-bottom:10px}
-  .sub{font-size:11.5px;color:var(--dim2);line-height:1.55;margin:-4px 0 10px}
+  .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--mut);margin-bottom:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .note{font-family:var(--sans);font-size:11.5px;line-height:1.6;color:var(--mut3);margin:-2px 0 10px}
 
-  .grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}
-  .stat{background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:9px 10px;min-width:0}
-  .stat .k{display:block;font-size:9.5px;letter-spacing:.13em;color:var(--dim2);text-transform:uppercase}
-  .stat .v{display:block;font-size:17px;margin-top:3px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
-  .stat .v.sm{font-size:13px}
-  .stat.hero .v{font-size:26px;color:var(--accent)}
+  /* status banner */
+  .banner{text-align:left;width:100%;border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:6px;
+    border:1px solid var(--line);background:var(--card)}
+  .banner .top{display:flex;align-items:center;justify-content:space-between}
+  .banner .hd{font-family:var(--mono);font-weight:700;font-size:16.5px;letter-spacing:.02em}
+  .banner .live{display:flex;align-items:center;gap:5px}
+  .banner .live i{width:6px;height:6px;border-radius:3px;animation:pulseDot 1.4s infinite;display:block}
+  .banner .live span{font-family:var(--mono);font-size:10px;letter-spacing:.1em}
+  .banner .sb{font-size:13px;color:oklch(75% 0.014 230)}
+  .banner .hint{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--mut2);margin-top:4px}
 
-  .btn{display:block;width:100%;padding:11px;margin:8px 0 0;border-radius:11px;font-size:13.5px;
-    border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--ink)}
-  .btn.primary{border:none;color:#04303a;background:linear-gradient(135deg,#5cead9,#28c7b9);font-weight:600}
-  .btn.ghost{background:none;color:var(--dim);border-color:transparent;text-decoration:underline;font-size:12px}
+  /* subsystem grid */
+  .subs{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+  .sub{display:flex;align-items:center;gap:7px}
+  .sub i{width:6px;height:6px;border-radius:3px;flex-shrink:0;display:block}
+  .sub .n{font-size:12px;color:var(--ink3);flex:1}
+  .sub .v{font-family:var(--mono);font-size:9.5px}
+
+  /* telemetry tiles */
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    display:flex;flex-direction:column;gap:5px;min-width:0}
+  .tile .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--mut)}
+  .tile .v{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--ink);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tile .v.sm{font-size:13px}
+
+  /* sparkline */
+  .spark{width:100%;height:100px;display:block;border-radius:8px;
+    background:repeating-linear-gradient(0deg,transparent,transparent 23px,oklch(95% 0.01 230 / 0.05) 24px),
+               repeating-linear-gradient(90deg,transparent,transparent 28px,oklch(95% 0.01 230 / 0.05) 29px)}
+
+  /* controls */
+  .btn{width:100%;padding:11px;border-radius:8px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+    background:var(--card2);border:1px solid var(--line2);cursor:pointer;margin-top:8px}
+  .btn.pri{background:var(--acc);border-color:var(--acc);color:oklch(18% 0.03 226);font-weight:700}
+  .btn.dgr{background:oklch(65% 0.19 25 / 0.12);border-color:oklch(65% 0.19 25 / 0.35);color:var(--bad)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .row{display:flex;gap:8px;align-items:center}
   .row .btn{margin-top:0}
-  input[type=number],input[type=text]{width:100%;padding:9px 11px;border-radius:10px;font-size:13.5px;color:var(--ink);
-    background:rgba(255,255,255,.05);border:1px solid var(--line);font-variant-numeric:tabular-nums}
-  label.f{display:block;font-size:11px;color:var(--dim2);margin:8px 0 4px;letter-spacing:.08em;text-transform:uppercase}
+  .fld{width:100%;padding:9px 11px;border-radius:8px;font-family:var(--mono);font-size:12.5px;color:var(--ink);
+    background:oklch(13% 0.014 230);border:1px solid var(--line2)}
+  .flbl{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--mut);margin:12px 0 5px}
+  input[type=range]{height:4px;border-radius:2px;background:oklch(30% 0.015 230);-webkit-appearance:none;appearance:none;width:100%}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:8px;
+    background:var(--ink);cursor:pointer;border:2px solid var(--acc)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:8px;background:var(--ink);
+    cursor:pointer;border:2px solid var(--acc)}
+  .seg{display:flex;gap:6px}
+  .seg button{flex:1;padding:6px 0;border-radius:6px;background:var(--card2);border:1px solid var(--line);
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--mut);cursor:pointer}
+  .seg button.on{background:var(--acc-dim);border-color:oklch(74% 0.11 226 / 0.5);color:var(--acc)}
 
-  /* ---- sip engine ---- */
-  .winbar{height:6px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;margin:8px 0 4px}
-  .winbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent2),var(--accent));
-    transition:width .2s linear}
-  .sip{border:1px solid var(--line);border-radius:12px;padding:10px 11px;margin:0 0 8px;background:var(--card2)}
+  /* sip entries */
+  .sip{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
   .sip .top{display:flex;align-items:baseline;gap:8px}
-  .sip .ml{font-size:19px;color:var(--accent)}
-  .sip .when{font-size:11px;color:var(--dim2);margin-left:auto}
-  .sip .meta{font-size:11px;color:var(--dim2);margin-top:5px;line-height:1.6}
-  .sip .meta b{color:var(--dim);font-weight:500}
-  .conf{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;letter-spacing:.06em}
-  .conf.hi{background:rgba(74,222,128,.16);color:var(--good)}
-  .conf.mid{background:rgba(255,180,90,.16);color:var(--warn)}
-  .conf.lo{background:rgba(255,107,107,.16);color:var(--bad)}
-  .verdict{display:flex;gap:7px;margin-top:9px}
-  .verdict button{flex:1;padding:7px;border-radius:9px;font-size:12px;border:1px solid var(--line);
-    background:rgba(255,255,255,.04);color:var(--dim)}
-  .verdict button.yes.sel{background:rgba(74,222,128,.18);color:var(--good);border-color:rgba(74,222,128,.45)}
-  .verdict button.no.sel{background:rgba(255,107,107,.16);color:var(--bad);border-color:rgba(255,107,107,.45)}
-  .verdict .done{flex:1;padding:7px;text-align:center;font-size:11.5px;color:var(--dim2)}
+  .sip .ml{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--acc)}
+  .sip .when{font-family:var(--mono);font-size:9.5px;color:var(--mut2);margin-left:auto}
+  .conf{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;padding:2px 8px;border-radius:999px}
+  .conf.hi{background:oklch(74% 0.15 150 / 0.14);color:var(--ok)}
+  .conf.mid{background:oklch(80% 0.15 85 / 0.14);color:var(--warn)}
+  .conf.lo{background:oklch(65% 0.19 25 / 0.14);color:var(--bad)}
+  .sip .meta{font-family:var(--mono);font-size:10px;color:var(--mut);margin-top:6px;line-height:1.65}
+  .sip .meta b{color:var(--ink3);font-weight:500}
+  .vd{display:flex;gap:7px;margin-top:10px}
+  .vd button{flex:1;padding:7px;border-radius:6px;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+    background:var(--card2);border:1px solid var(--line);color:var(--mut);cursor:pointer}
+  .vd button.yes.on{background:oklch(74% 0.15 150 / 0.16);border-color:oklch(74% 0.15 150 / 0.45);color:var(--ok)}
+  .vd button.no.on{background:oklch(65% 0.19 25 / 0.14);border-color:oklch(65% 0.19 25 / 0.45);color:var(--bad)}
+  .vd .done{flex:1;text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--mut2);padding:7px 0}
+  .vd .done a{color:var(--acc);cursor:pointer}
 
-  .logline{font-size:11px;padding:5px 8px;border-radius:8px;margin:0 0 4px;background:rgba(255,255,255,.03);
-    color:var(--dim2);border-left:2px solid var(--line);overflow-x:auto;white-space:nowrap}
-  .logline.sip{border-left-color:var(--accent)}
-  .logline.none{border-left-color:var(--dim2);opacity:.75}
-  .logline.refill{border-left-color:var(--accent2)}
-  .empty{font-size:12px;color:var(--dim2);text-align:center;padding:16px 8px}
-  .soon{opacity:.5;pointer-events:none}
-  .badge{display:inline-block;font-size:9.5px;letter-spacing:.1em;padding:2px 7px;border-radius:999px;
-    background:rgba(255,180,90,.14);color:var(--warn);margin-left:6px;vertical-align:middle}
+  .line{font-family:var(--mono);font-size:10px;padding:6px 9px;border-radius:7px;margin-bottom:4px;
+    background:oklch(15% 0.014 230);color:var(--mut);border-left:2px solid var(--line2);
+    overflow-x:auto;white-space:nowrap}
+  .line.sip{border-left-color:var(--acc)}
+  .line.refill{border-left-color:var(--teal)}
+  .line.none{border-left-color:var(--mut2);opacity:.75}
+  .empty{font-family:var(--mono);font-size:10.5px;color:var(--mut2);text-align:center;padding:18px 8px}
+  .kvr{display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--line);gap:10px}
+  .kvr:last-child{border-bottom:none}
+  .kvr .n{flex:1;font-size:13px;color:var(--ink3)}
+  .kvr .v{font-family:var(--mono);font-size:11.5px;color:var(--mut3)}
+  .soon{opacity:.45;pointer-events:none}
+  .tagSoon{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;padding:2px 6px;border-radius:4px;
+    background:oklch(80% 0.15 85 / 0.14);color:var(--warn);margin-left:7px;vertical-align:middle}
 
-  /* ---- toast ---- */
-  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:200;padding:10px 16px;
-    border-radius:11px;background:rgba(14,34,48,.97);border:1px solid var(--line);color:var(--ink);
-    font-size:12.5px;max-width:88vw;text-align:center;opacity:0;transition:opacity .2s;pointer-events:none}
+  /* bottom nav */
+  nav{flex-shrink:0;display:flex;border-top:1px solid var(--line);background:var(--bg2);
+    padding:8px 8px calc(10px + env(safe-area-inset-bottom));position:sticky;bottom:0;z-index:20}
+  nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;background:transparent;
+    border:none;padding:6px 0 2px;cursor:pointer}
+  nav button i{width:4px;height:4px;border-radius:2px;background:var(--acc);opacity:0;display:block;transition:opacity .15s}
+  nav button.on i{opacity:1}
+  nav button span{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--mut)}
+  nav button.on span{color:var(--acc)}
+
+  #toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--pill);
+    border:1px solid var(--line2);border-radius:20px;padding:9px 16px;font-family:var(--mono);font-size:11px;
+    color:var(--ink2);box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:80;white-space:nowrap;max-width:90vw;
+    overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .2s;pointer-events:none}
   #toast.show{opacity:1}
 
-  /* ---- auth gate (styles the shared ORQA.auth module expects) ---- */
+  /* auth gate */
   #authGate{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;padding:26px;
-    background:radial-gradient(120% 90% at 50% 0%,#0d2434,#050f16)}
-  #authGate .agCard{width:100%;max-width:360px;padding:28px 22px 22px;border-radius:22px;text-align:center;
-    background:var(--card);border:1px solid var(--line)}
-  #authGate .agBrand{font-size:26px;letter-spacing:.34em;color:var(--ink)}
-  #authGate .agSub{font-size:12px;color:var(--dim);margin:8px 0 20px}
-  #authGate input{width:100%;margin:0 0 10px;padding:13px 15px;border-radius:13px;font-size:14px;color:var(--ink);
-    background:rgba(255,255,255,.05);border:1px solid var(--line)}
-  #authGate .agErr{min-height:16px;font-size:11.5px;color:#ff9a9a;margin:2px 0 8px}
-  #authGate .agBtn{width:100%;margin:0 0 9px;padding:13px;border-radius:13px;font-size:14px;font-weight:600;
-    color:var(--ink);background:rgba(255,255,255,.05);border:1px solid var(--line)}
-  #authGate .agBtn.primary{color:#04303a;background:linear-gradient(135deg,#5cead9,#28c7b9);border:none}
-  #authGate .agGhost{width:100%;margin-top:6px;padding:8px;font-size:12px;color:var(--dim);
-    background:none;border:none;text-decoration:underline}
+    background:oklch(11% 0.014 230)}
+  #authGate .agCard{width:100%;max-width:360px;padding:28px 22px 22px;border-radius:18px;text-align:center;
+    background:var(--card);border:1px solid var(--line2)}
+  #authGate .agBrand{font-family:var(--mono);font-size:22px;font-weight:700;letter-spacing:.22em;color:var(--ink)}
+  #authGate .agSub{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--mut);margin:9px 0 20px}
+  #authGate input{width:100%;margin:0 0 10px;padding:12px 14px;border-radius:9px;font-family:var(--mono);
+    font-size:13px;color:var(--ink);background:oklch(13% 0.014 230);border:1px solid var(--line2)}
+  #authGate .agErr{min-height:16px;font-family:var(--mono);font-size:10.5px;color:var(--bad);margin:2px 0 8px}
+  #authGate .agBtn{width:100%;margin:0 0 9px;padding:12px;border-radius:9px;font-family:var(--mono);font-size:11px;
+    letter-spacing:.08em;color:var(--ink);background:var(--card2);border:1px solid var(--line2);cursor:pointer}
+  #authGate .agBtn.primary{color:oklch(18% 0.03 226);background:var(--acc);border:none;font-weight:700}
+  #authGate .agGhost{width:100%;margin-top:6px;padding:8px;font-family:var(--mono);font-size:10px;color:var(--mut);
+    background:none;border:none;text-decoration:underline;cursor:pointer}
   #authGate .agBusy{opacity:.6;pointer-events:none}
 </style>
 </head>
 <body>
 
 <header>
-  <span class="brand">ORQA</span>
-  <span class="badge">v3</span>
-  <span class="grow"></span>
-  <span class="chip" id="chipBatt"><span class="dot"></span><span id="chipBattT">—</span></span>
-  <span class="chip" id="chipConn"><span class="dot"></span><span id="chipConnT">offline</span></span>
+  <div class="hL">
+    <span class="hTag">[LC1]</span>
+    <span class="hCur"></span>
+    <span class="hSub">DEV CONSOLE</span>
+  </div>
+  <button class="podBtn" id="podBtn">
+    <span id="podLabel">NO POD</span>
+    <div class="bars" id="podBars"><i style="height:4px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:13px"></i></div>
+  </button>
 </header>
 
+<!-- ══════════════════════════ DASH ══════════════════════════ -->
+<main id="scDash">
+  <div class="stack">
+
+    <div class="banner" id="banner">
+      <div class="top">
+        <span class="hd" id="bnHd">DISCONNECTED</span>
+        <div class="live"><i id="bnDot"></i><span id="bnLive">IDLE</span></div>
+      </div>
+      <span class="sb" id="bnSub">No pod linked. Tap the chip above to connect.</span>
+      <span class="hint" id="bnHint">BLE · SERVICE 0x180D</span>
+    </div>
+
+    <div class="card">
+      <div class="lbl">SUBSYSTEMS</div>
+      <div class="subs" id="subs"></div>
+    </div>
+
+    <div>
+      <div class="lbl">LIVE TELEMETRY</div>
+      <div class="tiles" id="tele"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="lbl" style="margin:0">WEIGHT (LIVE)</span>
+        <span style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--acc)" id="wLabel">— g</span>
+      </div>
+      <svg viewBox="0 0 300 100" class="spark" preserveAspectRatio="none">
+        <polyline id="wSpark" points="" fill="none" stroke="oklch(74% 0.11 226)" stroke-width="1.8"/>
+      </svg>
+    </div>
+
+    <div class="card">
+      <div class="lbl">POWER</div>
+      <div class="tiles">
+        <div class="tile"><span class="k">CHARGE</span><span class="v" id="bPct">—</span></div>
+        <div class="tile"><span class="k">VOLTAGE</span><span class="v sm" id="bV">—</span></div>
+        <div class="tile"><span class="k">DRAW NOW</span><span class="v sm" id="bMa">—</span></div>
+        <div class="tile"><span class="k">DRAIN</span><span class="v sm" id="bDrain">—</span></div>
+        <div class="tile"><span class="k">EMPTY IN</span><span class="v sm" id="bEta">—</span></div>
+        <div class="tile"><span class="k">CHARGING</span><span class="v sm" id="bChg">—</span></div>
+        <div class="tile"><span class="k">FULL IN</span><span class="v sm" id="bChgEta">—</span></div>
+        <div class="tile"><span class="k">CAPACITY</span><span class="v sm" id="bCap">—</span></div>
+      </div>
+      <div class="lbl" style="margin:14px 0 8px">PER-COMPONENT DRAW</div>
+      <div class="subs" id="pwGrid"></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">LED CONTROL</div>
+      <div class="note">Writes GLOW to the pod. The ring is driven live — this is control, not detection.</div>
+      <div class="row" style="margin-bottom:12px">
+        <div id="ledSw" style="display:flex;flex-wrap:wrap;gap:7px"></div>
+      </div>
+      <label class="flbl">BRIGHTNESS</label>
+      <input type="range" id="ledBri" min="5" max="100" value="60">
+      <div class="seg" style="margin-top:12px">
+        <button data-glow="off">OFF</button>
+        <button data-glow="on" class="on">SOLID</button>
+        <button data-glow="auto">AUTO</button>
+        <button data-glow="show">SHOW</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">POWER SAVER <span class="tagSoon">COMING LATER</span></div>
+      <div class="note">Per-component power cuts are not wired up yet. The pod exposes a single
+        AUTO / ON / OFF mode today; these switch independently when it lands.</div>
+      <div class="soon">
+        <div class="kvr"><span class="n">LED ring rail</span><span class="v">RAIL CUT</span></div>
+        <div class="kvr"><span class="n">Load cell excitation</span><span class="v">SLEEP</span></div>
+        <div class="kvr"><span class="n">Haptic driver</span><span class="v">STANDBY</span></div>
+        <div class="kvr"><span class="n">IMU</span><span class="v">LOW RATE</span></div>
+      </div>
+      <div class="lbl" style="margin:14px 0 8px">POWER MODE · LIVE</div>
+      <div class="seg">
+        <button data-ps="AUTO">AUTO</button>
+        <button data-ps="ON">ON</button>
+        <button data-ps="OFF">OFF</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══════════════════════════ CAL ══════════════════════════ -->
+<main id="scCal" hidden>
+  <div class="stack">
+
+    <div class="card">
+      <div class="lbl">ZERO OFFSET</div>
+      <div class="tiles">
+        <div class="tile"><span class="k">RAW</span><span class="v sm" id="cRaw">—</span></div>
+        <div class="tile"><span class="k">TARE</span><span class="v sm" id="cTare">—</span></div>
+        <div class="tile"><span class="k">SCALE</span><span class="v sm" id="cScale">—</span></div>
+        <div class="tile"><span class="k">READS</span><span class="v sm" id="cReads">—</span></div>
+      </div>
+      <div class="note" id="cWarn" style="margin:10px 0 0"></div>
+      <button class="btn" id="btnTare">TARE NOW</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">CALIBRATION POINTS</div>
+      <div class="note">Put a known mass on the cell, tap CAPTURE to read the raw counts, then ADD POINT.
+        Two points give a straight line; more let the fit reject a bad one. The fit below is least-squares
+        over every point — that is what APPLY writes to the pod.</div>
+      <div id="calPts"></div>
+      <label class="flbl">KNOWN (g) · RAW (counts)</label>
+      <div class="row">
+        <input class="fld" type="number" id="calKnown" placeholder="known g" step="1">
+        <input class="fld" type="number" id="calRaw" placeholder="raw" step="1">
+        <button class="btn" id="btnCapture" style="width:auto;padding:9px 14px;white-space:nowrap">CAPTURE</button>
+      </div>
+      <button class="btn" id="btnAddPt">ADD POINT</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">CALIBRATION CURVE</div>
+      <svg viewBox="0 0 300 120" class="spark" style="height:120px" preserveAspectRatio="none" id="calSvg">
+        <line id="calFit" x1="0" y1="120" x2="300" y2="0" stroke="oklch(74% 0.11 226)" stroke-width="1.6"/>
+        <g id="calDots"></g>
+      </svg>
+      <div class="tiles" style="margin-top:12px">
+        <div class="tile"><span class="k">GAIN (counts/g)</span><span class="v sm" id="fitGain">—</span></div>
+        <div class="tile"><span class="k">OFFSET (counts)</span><span class="v sm" id="fitOff">—</span></div>
+        <div class="tile"><span class="k">R²</span><span class="v sm" id="fitR2">—</span></div>
+        <div class="tile"><span class="k">RESIDUAL</span><span class="v sm" id="fitRes">—</span></div>
+      </div>
+      <button class="btn pri" id="btnApplyCal" disabled>APPLY CALIBRATION</button>
+      <button class="btn" id="btnResetCal">RESET POINTS</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">MANUAL FINE-TUNE</div>
+      <div class="note">Writes the pair directly. Also the restore path after a chip erase, which wipes
+        /pod.cfg and drops the pod back to the factory 420 counts/g.</div>
+      <label class="flbl">OFFSET · TARE</label>
+      <input class="fld" type="number" id="pinTare" placeholder="tare counts" step="1">
+      <label class="flbl">GAIN · SCALE</label>
+      <input class="fld" type="number" id="pinScale" placeholder="counts per gram" step="0.01">
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="btnCalRead" style="margin:0">READ FROM POD</button>
+        <button class="btn" id="btnCalPin" style="margin:0">PIN TO POD</button>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══════════════════════════ SIP ══════════════════════════ -->
+<main id="scSip" hidden>
+  <div class="stack">
+
+    <div>
+      <div class="lbl">TODAY</div>
+      <div class="tiles">
+        <div class="tile"><span class="k">SIPS</span><span class="v" id="tSips">0</span></div>
+        <div class="tile"><span class="k">TOTAL</span><span class="v" id="tTotal">0 ml</span></div>
+        <div class="tile"><span class="k">AVG SIP</span><span class="v sm" id="tAvg">—</span></div>
+        <div class="tile"><span class="k">BOTTLE</span><span class="v sm" id="tBottle">—</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">DETECTION WINDOW</div>
+      <div class="note">The pod only trusts a weight after the IMU has been still and upright for the whole
+        window. Motion resets it.</div>
+      <div class="tiles">
+        <div class="tile"><span class="k">WINDOW</span><span class="v sm" id="sWin">—</span></div>
+        <div class="tile"><span class="k">STATE</span><span class="v sm" id="sState">—</span></div>
+        <div class="tile"><span class="k">STILL</span><span class="v sm" id="sStill">—</span></div>
+        <div class="tile"><span class="k">BASELINE</span><span class="v sm" id="sBase">—</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="lbl">WAS THAT REALLY A SIP?</div>
+      <div class="note">Confidence comes from how settled the window was, how many samples it held, the size
+        against the noise floor, and agreement with sips you have already confirmed. Correcting one is what
+        teaches it.</div>
+      <div id="sipList"></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">DETECTION CALIBRATION</div>
+      <div class="tiles">
+        <div class="tile"><span class="k">CONFIRMED</span><span class="v sm" id="lYes">0</span></div>
+        <div class="tile"><span class="k">REJECTED</span><span class="v sm" id="lNo">0</span></div>
+        <div class="tile"><span class="k">TYPICAL</span><span class="v sm" id="lMean">—</span></div>
+        <div class="tile"><span class="k">RANGE</span><span class="v sm" id="lRange">—</span></div>
+      </div>
+      <div class="note" id="lAdvice" style="margin:12px 0 0"></div>
+      <button class="btn" id="btnApplyLearn" disabled>APPLY SUGGESTED MINIMUM</button>
+      <label class="flbl">STILLNESS WINDOW (s)</label>
+      <input class="fld" type="number" id="setWin" min="3" max="20" step="1" value="8">
+      <label class="flbl">MINIMUM SIP (ml)</label>
+      <input class="fld" type="number" id="setMin" min="1" max="50" step="1" value="5">
+      <button class="btn" id="btnSipCfg">SAVE TO POD</button>
+      <button class="btn" id="btnResetLearn">CLEAR CORRECTIONS</button>
+    </div>
+
+    <div>
+      <div class="lbl">SIP LOG · EVERY DECISION</div>
+      <div class="note">Including the ones thrown away. A run of NONE against a real drop means the
+        threshold is wrong, not the sip.</div>
+      <div id="decList"></div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══════════════════════════ SET ══════════════════════════ -->
+<main id="scSet" hidden>
+  <div class="stack">
+
+    <div class="card">
+      <div class="lbl">ACCOUNT</div>
+      <div class="kvr"><span class="n" id="aWho">—</span><span class="v" id="aRole">—</span></div>
+      <button class="btn" id="btnLogout">LOG OUT · SWITCH ACCOUNT</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">CONNECTED POD</div>
+      <div class="kvr"><span class="n">Device</span><span class="v" id="dName">—</span></div>
+      <div class="kvr"><span class="n">Link</span><span class="v" id="dLink">—</span></div>
+      <div class="kvr"><span class="n">Uptime</span><span class="v" id="dUp">—</span></div>
+      <div class="kvr"><span class="n">Last reset</span><span class="v" id="dRR">—</span></div>
+      <div class="kvr"><span class="n">Power save</span><span class="v" id="dPs">—</span></div>
+      <div class="kvr"><span class="n">USB</span><span class="v" id="dUsb">—</span></div>
+      <button class="btn" id="btnForget">FORGET · DISCONNECT</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">APP SETTINGS</div>
+      <label class="flbl">DAILY GOAL (ml)</label>
+      <div class="row">
+        <input class="fld" type="number" id="setGoal" min="100" max="20000" step="50" value="2500">
+        <button class="btn" id="btnGoal" style="width:auto;padding:9px 16px;margin:0">SET</button>
+      </div>
+      <div class="kvr" style="margin-top:12px"><span class="n">Developer frames</span>
+        <span class="v"><button class="btn" id="btnDbg" style="margin:0;padding:5px 10px">OFF</button></span></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">FIRMWARE</div>
+      <div class="kvr"><span class="n">Protocol</span><span class="v" id="fVer">—</span></div>
+      <div class="kvr"><span class="n">Hardware rev</span><span class="v">XIAO nRF52840 SENSE</span></div>
+      <div class="kvr"><span class="n">Cell</span><span class="v" id="fCell">—</span></div>
+      <div class="kvr"><span class="n">App</span><span class="v">LC1 CONSOLE · v3</span></div>
+      <button class="btn" id="btnExport">EXPORT DEBUG LOG</button>
+      <button class="btn" id="btnRestart">RESTART POD</button>
+      <button class="btn dgr" id="btnDayReset">RESET TODAY'S COUNTERS</button>
+    </div>
+
+    <div class="card">
+      <div class="lbl">RAW FRAMES</div>
+      <div id="rawList"><div class="empty">DIAGNOSTICS OFF</div></div>
+    </div>
+
+  </div>
+</main>
+
 <nav>
-  <button id="tabHome" class="sel">Home</button>
-  <button id="tabSet">Settings · Dev</button>
+  <button data-tab="Dash" class="on"><i></i><span>DASH</span></button>
+  <button data-tab="Cal"><i></i><span>CAL</span></button>
+  <button data-tab="Sip"><i></i><span>SIP</span></button>
+  <button data-tab="Set"><i></i><span>SET</span></button>
 </nav>
-
-<!-- ═══════════════════════════════ HOME ═══════════════════════════════ -->
-<main id="home">
-
-  <div class="card">
-    <h2>Pod</h2>
-    <div class="grid">
-      <div class="stat hero"><span class="k">Water</span><span class="v" id="sWater">—</span></div>
-      <div class="stat"><span class="k">Gross</span><span class="v sm" id="sGross">—</span></div>
-      <div class="stat"><span class="k">State</span><span class="v sm" id="sState">—</span></div>
-      <div class="stat"><span class="k">Still</span><span class="v sm" id="sStill">—</span></div>
-    </div>
-    <button class="btn primary" id="btnConnect">Connect pod</button>
-    <button class="btn ghost" id="btnDisconnect" hidden>Disconnect</button>
-  </div>
-
-  <div class="card">
-    <h2>Sip engine · live</h2>
-    <div class="sub">The pod only trusts a weight after the IMU has been still and upright for the whole
-      window. Motion resets it. This bar is that window filling.</div>
-    <div class="winbar"><i id="winBar"></i></div>
-    <div class="grid" style="margin-top:8px">
-      <div class="stat"><span class="k">Window</span><span class="v sm" id="sWin">—</span></div>
-      <div class="stat"><span class="k">Baseline</span><span class="v sm" id="sBase">—</span></div>
-      <div class="stat"><span class="k">Sips today</span><span class="v sm" id="sSips">0</span></div>
-      <div class="stat"><span class="k">Total</span><span class="v sm" id="sTotal">0 ml</span></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Was that really a sip?</h2>
-    <div class="sub">Every measurement gets a confidence score from how settled the window was, how many
-      samples it held, and how the size compares with sips you have already confirmed. Correct it and the
-      engine learns — that is what moves the score, and what tunes the threshold below.</div>
-    <div id="sipList"><div class="empty">No sips yet. Take one and it lands here.</div></div>
-  </div>
-
-  <div class="card">
-    <h2>What the engine learned</h2>
-    <div class="grid">
-      <div class="stat"><span class="k">Confirmed</span><span class="v sm" id="lYes">0</span></div>
-      <div class="stat"><span class="k">Rejected</span><span class="v sm" id="lNo">0</span></div>
-      <div class="stat"><span class="k">Typical sip</span><span class="v sm" id="lMean">—</span></div>
-      <div class="stat"><span class="k">Accepted range</span><span class="v sm" id="lRange">—</span></div>
-    </div>
-    <div class="sub" id="lAdvice" style="margin:10px 0 0">Confirm or reject a few sips and a suggested
-      minimum will appear here.</div>
-    <button class="btn" id="btnApplyLearn" disabled>Apply suggested minimum to pod</button>
-    <button class="btn ghost" id="btnResetLearn">Reset what it learned</button>
-  </div>
-
-  <div class="card">
-    <h2>Decision log</h2>
-    <div class="sub">Every verdict the pod reached, including the ones it threw away. A run of NONE with a
-      real drop means the threshold is wrong, not the sip.</div>
-    <div id="decList"><div class="empty">Nothing decided yet.</div></div>
-  </div>
-
-  <div class="card">
-    <h2>Battery &amp; power</h2>
-    <div class="grid">
-      <div class="stat"><span class="k">Charge</span><span class="v" id="bPct">—</span></div>
-      <div class="stat"><span class="k">Voltage</span><span class="v sm" id="bV">—</span></div>
-      <div class="stat"><span class="k">Draw now</span><span class="v sm" id="bMa">—</span></div>
-      <div class="stat"><span class="k">Drain</span><span class="v sm" id="bDrain">—</span></div>
-      <div class="stat"><span class="k">Empty in</span><span class="v sm" id="bEta">—</span></div>
-      <div class="stat"><span class="k">Charging</span><span class="v sm" id="bChg">—</span></div>
-      <div class="stat"><span class="k">Full in</span><span class="v sm" id="bChgEta">—</span></div>
-      <div class="stat"><span class="k">Capacity</span><span class="v sm" id="bCap">—</span></div>
-    </div>
-    <div class="sub" style="margin:10px 0 6px">Per-component draw, live from the pod's own model</div>
-    <div class="grid">
-      <div class="stat"><span class="k">Board</span><span class="v sm" id="pBoard">—</span></div>
-      <div class="stat"><span class="k">BLE</span><span class="v sm" id="pBle">—</span></div>
-      <div class="stat"><span class="k">Cell</span><span class="v sm" id="pCell">—</span></div>
-      <div class="stat"><span class="k">IMU</span><span class="v sm" id="pImu">—</span></div>
-      <div class="stat"><span class="k">LED</span><span class="v sm" id="pLed">—</span></div>
-      <div class="stat"><span class="k">Haptic</span><span class="v sm" id="pHap">—</span></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Power saver <span class="badge">coming later</span></h2>
-    <div class="sub">Cutting power to individual components is not wired up yet. When it lands it will live
-      here, and it will be able to switch these off independently rather than the single AUTO/ON/OFF mode
-      the pod exposes today.</div>
-    <div class="soon">
-      <div class="row" style="margin-bottom:7px"><span class="grow" style="font-size:13px">LED ring rail</span><span class="chip">rail cut</span></div>
-      <div class="row" style="margin-bottom:7px"><span class="grow" style="font-size:13px">Load cell excitation</span><span class="chip">sleep between weighs</span></div>
-      <div class="row" style="margin-bottom:7px"><span class="grow" style="font-size:13px">Haptic driver</span><span class="chip">standby</span></div>
-      <div class="row"><span class="grow" style="font-size:13px">IMU</span><span class="chip">low-rate</span></div>
-    </div>
-  </div>
-
-</main>
-
-<!-- ═══════════════════════════ SETTINGS / DEV ═══════════════════════════ -->
-<main id="settings" hidden>
-
-  <div class="card">
-    <h2>Account</h2>
-    <div class="grid">
-      <div class="stat"><span class="k">Signed in</span><span class="v sm" id="aWho">—</span></div>
-      <div class="stat"><span class="k">Role</span><span class="v sm" id="aRole">—</span></div>
-    </div>
-    <button class="btn" id="btnLogout">Log out · switch account</button>
-  </div>
-
-  <div class="card">
-    <h2>Load cell calibration</h2>
-    <div class="sub">Two numbers live on the pod and persist in flash: <b>tare</b> (raw counts at zero) and
-      <b>scale</b> (counts per gram). Everything downstream is (raw − tare) ÷ scale. Tare and Calibrate both
-      wait for the reading to settle before storing, and refuse rather than write a drifting value.</div>
-    <div class="grid">
-      <div class="stat"><span class="k">Raw</span><span class="v sm mono" id="cRaw">—</span></div>
-      <div class="stat"><span class="k">Tare</span><span class="v sm mono" id="cTare">—</span></div>
-      <div class="stat"><span class="k">Scale</span><span class="v sm mono" id="cScale">—</span></div>
-      <div class="stat"><span class="k">Now reads</span><span class="v sm" id="cReads">—</span></div>
-    </div>
-    <div id="cWarn" class="sub" style="margin:10px 0 0"></div>
-
-    <label class="f">Step 1 — empty the cell, hold still</label>
-    <button class="btn" id="btnTare">Tare · set zero</button>
-
-    <label class="f">Step 2 — place a known weight</label>
-    <div class="row">
-      <input type="number" id="calRef" min="20" max="5000" value="400" />
-      <button class="btn" id="btnCalw" style="width:auto;padding:9px 16px;white-space:nowrap">Calibrate</button>
-    </div>
-    <div class="sub" style="margin:6px 0 0">grams on the cell — water is 1 ml ≈ 1 g</div>
-
-    <label class="f">Pin a known pair — restores after a chip erase</label>
-    <div class="row">
-      <input type="number" id="pinTare" placeholder="tare" step="1" />
-      <input type="number" id="pinScale" placeholder="scale" step="0.01" />
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button class="btn" id="btnCalRead" style="margin:0">Read from pod</button>
-      <button class="btn" id="btnCalPin" style="margin:0">Pin to pod</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Sip engine tuning</h2>
-    <div class="sub">Saved on the pod and survives reboot.</div>
-    <label class="f">Stillness window — how long the pod must sit still before a weight counts</label>
-    <div class="row">
-      <input type="number" id="setWin" min="3" max="20" step="1" value="8" />
-      <span class="chip">seconds</span>
-    </div>
-    <label class="f">Minimum sip — a drop smaller than this is treated as noise</label>
-    <div class="row">
-      <input type="number" id="setMin" min="1" max="50" step="1" value="5" />
-      <span class="chip">ml</span>
-    </div>
-    <button class="btn" id="btnSipCfg">Save to pod</button>
-  </div>
-
-  <div class="card">
-    <h2>Pod</h2>
-    <label class="f">Daily goal (ml)</label>
-    <div class="row">
-      <input type="number" id="setGoal" min="100" max="20000" step="50" value="2500" />
-      <button class="btn" id="btnGoal" style="width:auto;padding:9px 16px;margin:0">Set</button>
-    </div>
-    <button class="btn" id="btnDayReset">Reset today's counters</button>
-    <button class="btn" id="btnRestart">Restart pod</button>
-    <div class="grid" style="margin-top:10px">
-      <div class="stat"><span class="k">Uptime</span><span class="v sm" id="dUp">—</span></div>
-      <div class="stat"><span class="k">Last reset</span><span class="v sm" id="dRR">—</span></div>
-      <div class="stat"><span class="k">Power save</span><span class="v sm" id="dPs">—</span></div>
-      <div class="stat"><span class="k">USB</span><span class="v sm" id="dUsb">—</span></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Raw frames</h2>
-    <div class="sub">Everything the pod sends, unparsed. Useful when a number looks wrong.</div>
-    <button class="btn" id="btnDbg">Enable diagnostic frames</button>
-    <div id="rawList"><div class="empty">Diagnostics off.</div></div>
-  </div>
-
-</main>
 
 <div id="toast"></div>
 
 <script type="module">
-/* ══════════════════════════════════════════════════════════════════════════
-   ORQA v3 — sip engine instrument
-   ══════════════════════════════════════════════════════════════════════════ */
 const ORQA = (window.ORQA = window.ORQA || {});
-
-/* ---- storage seam: localStorage by default, swappable by the auth module ---- */
-const LSKEY = 'orqaV3';            /* distinct from v2 so the two never collide */
+const LSKEY = 'orqaV3';
 ORQA.store = (function(){
   let impl = { name:'local',
     getItem:k=>{ try{ return localStorage.getItem(k); }catch(e){ return null; } },
     setItem:(k,v)=>{ try{ localStorage.setItem(k,v); }catch(e){} },
     removeItem:k=>{ try{ localStorage.removeItem(k); }catch(e){} } };
-  return { get name(){ return impl.name; },
-           use:a=>{ impl=a; try{ loadState(); }catch(e){} },
+  return { get name(){ return impl.name; }, use:a=>{ impl=a; try{ loadState(); }catch(e){} },
            getItem:k=>impl.getItem(k), setItem:(k,v)=>impl.setItem(k,v), removeItem:k=>impl.removeItem(k) };
 })();
 
@@ -362,436 +496,477 @@ let toastT=null;
 function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show');
   clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'), 2600); }
 
-/* ══════════════════════════════ state ══════════════════════════════ */
 const POD = {
-  connected:false, device:null, cmdChar:null, lastFrame:0,
+  connected:false, device:null, cmdChar:null, lastFrame:0, name:null,
   ml:0, mlPrecise:null, gross:0, state:'—', still:false, tilt:0,
   sips:0, total:0, goal:2500, batt:null, vbat:null,
-  raw:null, tare:null, scale:null, up:0, ps:[0,0], usb:false, chg:false,
+  raw:null, tare:null, scale:null, cell:null, imu:null, hap:null, ver:null,
+  up:0, ps:[0,0], usb:false, chg:false,
   ma:null, pw:null, cap:null, rr:null, chgEta:null, drainPh:null, chgCur:null,
   cfg:{ win:8000, min:5 },
 };
-/* SIPS[] — one entry per measurement the pod accepted as a sip.
-   verdict: null = unanswered, true = confirmed, false = rejected.             */
-let SIPS = [];
-let DECS = [];        /* every EVT|DECIDE, including NONE                      */
-let RAWS = [];        /* raw frame tail, dev only                              */
-let dbgOn = false;
+let SIPS=[], DECS=[], RAWS=[], WHIST=[], CALPTS=[], dbgOn=false;
 
-/* ══════════════════════════ persistence ══════════════════════════ */
-function saveState(){
-  try{ ORQA.store.setItem(LSKEY, JSON.stringify({
-    v:1, sips:SIPS.slice(0,200), goal:POD.goal,
-  })); }catch(e){}
-}
+/* ── persistence ── */
+function saveState(){ try{ ORQA.store.setItem(LSKEY, JSON.stringify({
+  v:2, sips:SIPS.slice(0,200), goal:POD.goal, calpts:CALPTS })); }catch(e){} }
 function loadState(){
   let s=null; try{ s=JSON.parse(ORQA.store.getItem(LSKEY)||'null'); }catch(e){}
   if(!s) return;
-  SIPS = Array.isArray(s.sips) ? s.sips : [];
-  if(s.goal) POD.goal=s.goal;
-  renderSips(); renderLearn();
+  SIPS = Array.isArray(s.sips)?s.sips:[]; CALPTS = Array.isArray(s.calpts)?s.calpts:[];
+  if(s.goal){ POD.goal=s.goal; const g=$('setGoal'); if(g) g.value=s.goal; }
+  renderSips(); renderLearn(); renderCalPts();
 }
-/* the auth module calls this when an account is loaded/switched */
-window.__loadAccount = function(){ SIPS=[]; DECS=[]; loadState(); renderAll(); };
+window.__loadAccount = function(){ SIPS=[]; DECS=[]; CALPTS=[]; loadState(); renderAll(); };
 
-/* ═══════════════════════ confidence + learning ═══════════════════════
-   A score is only as honest as its inputs. Ours are:
-     - spread (SD) across the stillness window: the single best signal that the
-       cell had actually settled rather than merely paused
-     - sample count vs how many the window should have held
-     - size relative to the noise floor (sipMinMl)
-     - agreement with sips already CONFIRMED by hand — this is the part that
-       learns, and it stays neutral until there is something to learn from
-   With no corrections yet, the last term contributes nothing rather than
-   pretending to know. That is deliberate.                                     */
+/* ── confidence + learning ──
+   Inputs are the ones that actually indicate a trustworthy measurement: spread
+   across the stillness window, sample count, size against the noise floor, and
+   agreement with sips confirmed by hand. With no corrections yet the last term
+   contributes nothing rather than pretending to know.                          */
 function learned(){
-  const yes = SIPS.filter(s=>s.verdict===true).map(s=>s.ml);
-  const no  = SIPS.filter(s=>s.verdict===false).map(s=>s.ml);
+  const yes=SIPS.filter(s=>s.verdict===true).map(s=>s.ml), no=SIPS.filter(s=>s.verdict===false).map(s=>s.ml);
   if(!yes.length) return { n:0, nNo:no.length, mean:null, sd:null, lo:null, hi:null, yes, no };
-  const mean = yes.reduce((a,b)=>a+b,0)/yes.length;
-  const sd   = yes.length>1
-    ? Math.sqrt(yes.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(yes.length-1)) : null;
+  const mean=yes.reduce((a,b)=>a+b,0)/yes.length;
+  const sd=yes.length>1?Math.sqrt(yes.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(yes.length-1)):null;
   return { n:yes.length, nNo:no.length, mean, sd, lo:Math.min(...yes), hi:Math.max(...yes), yes, no };
 }
 function scoreSip(s){
-  let sc = 100; const why = [];
-  /* settle quality — spread across the window, in ml */
-  if(s.sd==null || s.sd < 0){ sc -= 10; why.push('no spread reported'); }
-  else if(s.sd <= 1.5){ /* clean */ }
-  else if(s.sd <= 3){ sc -= 12; why.push('window drifted '+s.sd.toFixed(1)+' ml'); }
-  else if(s.sd <= 6){ sc -= 28; why.push('unsettled, ±'+s.sd.toFixed(1)+' ml'); }
-  else { sc -= 45; why.push('very unsettled, ±'+s.sd.toFixed(1)+' ml'); }
-  /* sample count vs what the window should have collected (one per 500 ms) */
-  const want = Math.max(1, Math.round((s.win||8000)/500));
-  if(s.n!=null && s.n < want*0.6){ sc -= 18; why.push('only '+s.n+' of ~'+want+' samples'); }
-  /* size vs the noise floor */
-  const floor = POD.cfg.min||5;
-  if(s.ml <= floor*1.5){ sc -= 20; why.push('barely above the '+floor+' ml floor'); }
-  if(s.ml > 300){ sc -= 25; why.push('very large for one sip'); }
-  /* agreement with what has actually been confirmed */
-  const L = learned();
-  if(L.n >= 3 && L.sd && L.sd > 0.5){
-    const z = Math.abs(s.ml - L.mean)/L.sd;
-    if(z > 2.5){ sc -= 22; why.push('unlike your usual '+Math.round(L.mean)+' ml'); }
-    else if(z > 1.5){ sc -= 10; why.push('larger spread than usual'); }
+  let sc=100; const why=[];
+  if(s.sd==null||s.sd<0){ sc-=10; why.push('no spread reported'); }
+  else if(s.sd<=1.5){}
+  else if(s.sd<=3){ sc-=12; why.push('drifted '+s.sd.toFixed(1)+' ml'); }
+  else if(s.sd<=6){ sc-=28; why.push('unsettled ±'+s.sd.toFixed(1)+' ml'); }
+  else { sc-=45; why.push('very unsettled ±'+s.sd.toFixed(1)+' ml'); }
+  const want=Math.max(1,Math.round((s.win||8000)/500));
+  if(s.n!=null && s.n<want*0.6){ sc-=18; why.push('only '+s.n+' of ~'+want+' samples'); }
+  const floor=POD.cfg.min||5;
+  if(s.ml<=floor*1.5){ sc-=20; why.push('barely over the '+floor+' ml floor'); }
+  if(s.ml>300){ sc-=25; why.push('very large for one sip'); }
+  const L=learned();
+  if(L.n>=3 && L.sd && L.sd>0.5){
+    const z=Math.abs(s.ml-L.mean)/L.sd;
+    if(z>2.5){ sc-=22; why.push('unlike your usual '+Math.round(L.mean)+' ml'); }
+    else if(z>1.5){ sc-=10; why.push('wider than usual'); }
   }
-  if(L.no.length >= 2){
-    const nearBad = L.no.some(v => Math.abs(v - s.ml) <= Math.max(2, s.ml*0.12));
-    if(nearBad){ sc -= 18; why.push('close to sizes you rejected'); }
-  }
-  return { score: Math.max(0, Math.min(100, Math.round(sc))), why };
+  if(L.no.length>=2 && L.no.some(v=>Math.abs(v-s.ml)<=Math.max(2,s.ml*0.12))){
+    sc-=18; why.push('close to sizes you rejected'); }
+  return { score:Math.max(0,Math.min(100,Math.round(sc))), why };
 }
-function confClass(v){ return v>=75?'hi':v>=50?'mid':'lo'; }
-function confWord(v){ return v>=75?'likely real':v>=50?'uncertain':'probably not'; }
-
-/* suggested minimum: sit it below the smallest CONFIRMED sip but above the
-   largest REJECTED one, when those two do not overlap. If they overlap, size
-   alone cannot separate them and we say so instead of inventing a number.     */
+const confClass=v=>v>=75?'hi':v>=50?'mid':'lo';
+const confWord =v=>v>=75?'LIKELY REAL':v>=50?'UNCERTAIN':'PROBABLY NOT';
 function suggestMin(){
-  const L = learned();
-  if(L.n < 3) return { ok:false, msg:'Confirm at least 3 sips before a suggestion means anything. '
-    + L.n + ' so far.' };
-  if(!L.no.length) return { ok:false, msg:'Nothing rejected yet — the current minimum of '
-    + (POD.cfg.min||5) + ' ml has not been contradicted. Reject a false sip to teach it a boundary.' };
-  const maxNo = Math.max(...L.no);
-  if(maxNo >= L.lo) return { ok:false, msg:'Sips you accepted (from ' + Math.round(L.lo)
-    + ' ml) and rejected (up to ' + Math.round(maxNo) + ' ml) overlap in size, so size alone cannot '
-    + 'separate them. The difference is settle quality, not volume — look at the spread column.' };
-  const v = Math.max(1, Math.min(50, Math.round((maxNo + L.lo)/2)));
-  return { ok:true, value:v, msg:'Rejected sips top out at ' + Math.round(maxNo) + ' ml and accepted ones '
-    + 'start at ' + Math.round(L.lo) + ' ml. A minimum of ' + v + ' ml separates them cleanly.' };
+  const L=learned();
+  if(L.n<3) return { ok:false, msg:'Confirm at least 3 sips before a suggestion means anything. '+L.n+' so far.' };
+  if(!L.no.length) return { ok:false, msg:'Nothing rejected yet — the current '+(POD.cfg.min||5)
+    +' ml minimum has not been contradicted. Reject a false sip to teach it a boundary.' };
+  const maxNo=Math.max(...L.no);
+  if(maxNo>=L.lo) return { ok:false, msg:'Accepted sips (from '+Math.round(L.lo)+' ml) and rejected ones (up to '
+    +Math.round(maxNo)+' ml) overlap in size, so size alone cannot separate them. The difference is settle '
+    +'quality, not volume — compare the spread figures.' };
+  const v=Math.max(1,Math.min(50,Math.round((maxNo+L.lo)/2)));
+  return { ok:true, value:v, msg:'Rejected top out at '+Math.round(maxNo)+' ml, accepted start at '
+    +Math.round(L.lo)+' ml. A '+v+' ml minimum separates them cleanly.' };
+}
+
+/* ── calibration least-squares: raw = gain·grams + offset ── */
+function calFit(){
+  const p=CALPTS.filter(x=>Number.isFinite(x.g)&&Number.isFinite(x.raw));
+  if(p.length<2) return null;
+  const n=p.length, sx=p.reduce((a,b)=>a+b.g,0), sy=p.reduce((a,b)=>a+b.raw,0);
+  const sxx=p.reduce((a,b)=>a+b.g*b.g,0), sxy=p.reduce((a,b)=>a+b.g*b.raw,0);
+  const den=n*sxx-sx*sx; if(Math.abs(den)<1e-9) return null;
+  const gain=(n*sxy-sx*sy)/den, off=(sy-gain*sx)/n;
+  const ym=sy/n;
+  const ssTot=p.reduce((a,b)=>a+(b.raw-ym)*(b.raw-ym),0);
+  const ssRes=p.reduce((a,b)=>{const e=b.raw-(gain*b.g+off);return a+e*e;},0);
+  const r2=ssTot>0?1-ssRes/ssTot:1;
+  /* residual expressed in grams — the number that actually matters */
+  const resG=gain!==0?Math.sqrt(ssRes/n)/Math.abs(gain):null;
+  return { gain, off, r2, resG, n };
 }
 
 /* ══════════════════════════════ BLE ══════════════════════════════ */
 const SVC='0000180d-0000-1000-8000-00805f9b34fb', C_LIVE='00002a57-0000-1000-8000-00805f9b34fb',
       C_SIP='00002a58-0000-1000-8000-00805f9b34fb', C_CMD='00002a59-0000-1000-8000-00805f9b34fb',
       C_EVT='00002a5a-0000-1000-8000-00805f9b34fb';
-const dec = new TextDecoder();
-const kv = s => { const o={}; String(s).split('|').forEach(p=>{ const i=p.indexOf(':');
-  if(i>0) o[p.slice(0,i)] = p.slice(i+1); }); return o; };
-const num = (v,d) => { const n=parseFloat(v); return Number.isFinite(n)?n:d; };
+const dec=new TextDecoder();
+const kv=s=>{const o={};String(s).split('|').forEach(p=>{const i=p.indexOf(':');if(i>0)o[p.slice(0,i)]=p.slice(i+1);});return o;};
+const num=(v,d)=>{const n=parseFloat(v);return Number.isFinite(n)?n:d;};
 
 async function connect(){
-  if(!navigator.bluetooth){ toast('This browser has no Web Bluetooth'); return; }
+  if(POD.connected){ disconnect(); return; }
+  if(!navigator.bluetooth){ toast('NO WEB BLUETOOTH IN THIS BROWSER'); return; }
   try{
-    const d = await navigator.bluetooth.requestDevice({ filters:[{ services:[SVC] }], optionalServices:[SVC] });
-    POD.device = d;
+    const d=await navigator.bluetooth.requestDevice({ filters:[{services:[SVC]}], optionalServices:[SVC] });
+    POD.device=d; POD.name=d.name||'POD';
     d.addEventListener('gattserverdisconnected', onDrop);
-    const srv = await d.gatt.connect();
-    const s   = await srv.getPrimaryService(SVC);
-    const live= await s.getCharacteristic(C_LIVE); await live.startNotifications();
+    const srv=await d.gatt.connect(), s=await srv.getPrimaryService(SVC);
+    const live=await s.getCharacteristic(C_LIVE); await live.startNotifications();
     live.addEventListener('characteristicvaluechanged', e=>onFrame(dec.decode(e.target.value)));
-    const sip = await s.getCharacteristic(C_SIP);  await sip.startNotifications();
+    const sip=await s.getCharacteristic(C_SIP); await sip.startNotifications();
     sip.addEventListener('characteristicvaluechanged', e=>onSip(dec.decode(e.target.value)));
     try{ const ev=await s.getCharacteristic(C_EVT); await ev.startNotifications();
       ev.addEventListener('characteristicvaluechanged', e=>onEvt(dec.decode(e.target.value))); }catch(e){}
-    try{ POD.cmdChar = await s.getCharacteristic(C_CMD); }catch(e){ POD.cmdChar=null; }
-    POD.connected = true; renderAll();
-    toast('Pod connected');
-    cmd('DBG:1');                       /* diagnostics carry battery + calibration */
-    setTimeout(()=>cmd('CAL'), 500);    /* pull the live calibration pair          */
-  }catch(e){ if(e && e.name!=='NotFoundError') toast('Connect failed: '+(e.message||e)); }
+    try{ POD.cmdChar=await s.getCharacteristic(C_CMD); }catch(e){ POD.cmdChar=null; }
+    POD.connected=true; renderAll(); toast('POD LINKED');
+    cmd('DBG:1'); setTimeout(()=>cmd('CAL'), 500);
+  }catch(e){ if(e&&e.name!=='NotFoundError') toast('CONNECT FAILED'); }
 }
-function onDrop(){ POD.connected=false; POD.cmdChar=null; renderAll(); toast('Pod disconnected'); }
-function disconnect(){ try{ POD.device && POD.device.gatt.connected && POD.device.gatt.disconnect(); }catch(e){} }
-window.__autoConnectPod = function(){ /* v3 keeps connection explicit — no silent reconnect */ };
+function onDrop(){ POD.connected=false; POD.cmdChar=null; renderAll(); toast('POD DISCONNECTED'); }
+function disconnect(){ try{ POD.device&&POD.device.gatt.connected&&POD.device.gatt.disconnect(); }catch(e){} }
+window.__autoConnectPod=function(){};
+function cmd(c){ if(!POD.cmdChar){ toast('NO COMMAND CHANNEL'); return false; }
+  try{ POD.cmdChar.writeValue(new TextEncoder().encode(c)); return true; }catch(e){ toast('COMMAND FAILED'); return false; } }
 
-function cmd(c){
-  if(!POD.cmdChar){ toast('No command channel — connect first'); return false; }
-  try{ POD.cmdChar.writeValue(new TextEncoder().encode(c)); return true; }
-  catch(e){ toast('Command failed'); return false; }
-}
-
-/* ─────────────────────────── frame handling ─────────────────────────── */
 function onFrame(str){
-  POD.lastFrame = Date.now();
-  if(dbgOn && /^D[123]\|/.test(str)) pushRaw(str);
+  POD.lastFrame=Date.now();
+  if(dbgOn&&/^D[123]\|/.test(str)) pushRaw(str);
   if(str.startsWith('D1|')) return onD1(kv(str));
   if(str.startsWith('D2|')) return onD2(kv(str));
   if(str.startsWith('D3|')) return onD3(kv(str));
-  if(str.startsWith('DR|')) return;                 /* fast raw trace — not used here */
-  const o = kv(str);
-  POD.gross = num(o.W, POD.gross);
-  POD.ml    = num(o.VOL, POD.ml);
-  POD.mlPrecise = num(o.VOLD, null);
-  POD.sips  = num(o.SIPS, POD.sips);
-  POD.total = num(o.TOT, POD.total);
-  POD.goal  = num(o.GOAL, POD.goal);
-  POD.batt  = num(o.BATT, POD.batt);
-  POD.vbat  = num(o.VBAT, POD.vbat);
-  POD.tilt  = num(o.TILT, POD.tilt);
-  POD.still = o.STBL === '1';
-  POD.state = o.ST || POD.state;
+  if(str.startsWith('DR|')) return;
+  const o=kv(str);
+  POD.gross=num(o.W,POD.gross); POD.ml=num(o.VOL,POD.ml); POD.mlPrecise=num(o.VOLD,null);
+  POD.sips=num(o.SIPS,POD.sips); POD.total=num(o.TOT,POD.total); POD.goal=num(o.GOAL,POD.goal);
+  POD.batt=num(o.BATT,POD.batt); POD.vbat=num(o.VBAT,POD.vbat); POD.tilt=num(o.TILT,POD.tilt);
+  POD.still=o.STBL==='1'; POD.state=o.ST||POD.state;
+  const w=POD.mlPrecise!=null?POD.mlPrecise:POD.ml;
+  WHIST.push(w); if(WHIST.length>60) WHIST.shift();
   renderLive();
 }
 function onD1(o){
-  POD.raw   = num(o.RAW, POD.raw);
-  POD.tare  = num(o.TARE, POD.tare);
-  POD.scale = num(o.SC, POD.scale);
-  POD.up    = num(o.UP, POD.up);
-  POD.usb   = o.USB === '1';
-  POD.chg   = o.CHG === '1';
-  if(o.PS) POD.ps = String(o.PS).split('/').map(Number);
-  renderCal(); renderDev();
+  POD.raw=num(o.RAW,POD.raw); POD.tare=num(o.TARE,POD.tare); POD.scale=num(o.SC,POD.scale);
+  POD.cell=o.CELL||POD.cell; POD.imu=o.IMU==='1'; POD.hap=o.HAP==='1'; POD.ver=o.VER||POD.ver;
+  POD.up=num(o.UP,POD.up); POD.usb=o.USB==='1'; POD.chg=o.CHG==='1';
+  if(o.PS) POD.ps=String(o.PS).split('/').map(Number);
+  renderCal(); renderDev(); renderSubs();
 }
 function onD2(o){
-  POD.ma  = num(o.MA, POD.ma);
-  POD.cap = num(o.CAP, POD.cap);
-  if(o.PW) POD.pw = String(o.PW).split('/').map(Number);
-  /* live sip config straight off the pod — the settings inputs mirror this */
-  const win = num(o.SST, null), min = num(o.SML, null);
-  if(win!=null){ POD.cfg.win = win; const el=$('setWin'); if(el && document.activeElement!==el) el.value=Math.round(win/1000); }
-  if(min!=null){ POD.cfg.min = min; const el=$('setMin'); if(el && document.activeElement!==el) el.value=min; }
+  POD.ma=num(o.MA,POD.ma); POD.cap=num(o.CAP,POD.cap);
+  if(o.PW) POD.pw=String(o.PW).split('/').map(Number);
+  const win=num(o.SST,null), min=num(o.SML,null);
+  if(win!=null){ POD.cfg.win=win; const el=$('setWin'); if(el&&document.activeElement!==el) el.value=Math.round(win/1000); }
+  if(min!=null){ POD.cfg.min=min; const el=$('setMin'); if(el&&document.activeElement!==el) el.value=min; }
   renderPower();
 }
 function onD3(o){
-  POD.chgEta = num(o.CHT, null);
-  POD.drainPh= num(o.DPH, null);
-  POD.chgCur = num(o.CC, null);
-  POD.rr     = o.RR || POD.rr;
-  renderPower(); renderDev();
+  POD.chgEta=num(o.CHT,null); POD.drainPh=num(o.DPH,null); POD.chgCur=num(o.CC,null);
+  POD.rr=o.RR||POD.rr; renderPower(); renderDev();
 }
 function onSip(str){
-  const o = kv(str);
-  const ml = num(o.ML, 0); if(!ml) return;
-  /* the DECIDE event carries the quality numbers and lands just before this */
-  const d = DECS.find(x => x.verdict==='SIP' && Math.abs(x.d - ml) <= 1 && Date.now()-x.t < 4000);
-  SIPS.unshift({
-    seq: num(o.N, SIPS.length+1), ml, t: Date.now(),
-    vol: num(o.VOL, POD.ml),
-    sd: d ? d.sd : null, n: d ? d.n : null, win: d ? d.win : POD.cfg.win,
-    pre: d ? d.pre : null, post: d ? d.post : null,
-    verdict: null,
-  });
-  if(SIPS.length > 200) SIPS.pop();
-  saveState(); renderSips(); renderLearn();
+  const o=kv(str), ml=num(o.ML,0); if(!ml) return;
+  const d=DECS.find(x=>x.verdict==='SIP'&&Math.abs(x.d-ml)<=1&&Date.now()-x.t<4000);
+  SIPS.unshift({ seq:num(o.N,SIPS.length+1), ml, t:Date.now(), vol:num(o.VOL,POD.ml),
+    sd:d?d.sd:null, n:d?d.n:null, win:d?d.win:POD.cfg.win, pre:d?d.pre:null, post:d?d.post:null, verdict:null });
+  if(SIPS.length>200) SIPS.pop();
+  saveState(); renderSips(); renderLearn(); renderToday();
 }
 function onEvt(str){
   if(dbgOn) pushRaw(str);
-  const o = kv(str);
-  const first = str.split('|')[1] || '';
+  const o=kv(str), first=str.split('|')[1]||'';
   if(first.startsWith('DECIDE:')){
-    const v = first.slice(7);
-    DECS.unshift({ t:Date.now(), verdict:v, pre:num(o.PRE,null), post:num(o.POST,null),
-                   d:num(o.D,0), n:num(o.N,null), sd:num(o.SD,null), win:num(o.WIN,POD.cfg.win),
-                   why:o.WHY||null });
-    if(DECS.length > 60) DECS.pop();
-    renderDecs();
-    return;
+    DECS.unshift({ t:Date.now(), verdict:first.slice(7), pre:num(o.PRE,null), post:num(o.POST,null),
+      d:num(o.D,0), n:num(o.N,null), sd:num(o.SD,null), win:num(o.WIN,POD.cfg.win), why:o.WHY||null });
+    if(DECS.length>60) DECS.pop(); renderDecs(); return;
   }
-  if(str.startsWith('EVT|CAL')){
-    POD.tare = num(o.TARE, POD.tare); POD.scale = num(o.SC, POD.scale);
-    renderCal();
-    if(o.DEF === '1') toast('Pod is on the factory default scale — not calibrated');
-    return;
-  }
-  if(first.startsWith('ACK:')) { toast(first.slice(4) + ' ok'); return; }
-  if(first.startsWith('NAK:')) { toast(first.slice(4) + ' refused — hold it still and retry'); return; }
+  if(str.startsWith('EVT|CAL')){ POD.tare=num(o.TARE,POD.tare); POD.scale=num(o.SC,POD.scale); renderCal();
+    if(o.DEF==='1') toast('POD ON FACTORY DEFAULT SCALE'); return; }
+  if(first.startsWith('ACK:')){ toast(first.slice(4)+' OK'); return; }
+  if(first.startsWith('NAK:')){ toast(first.slice(4)+' REFUSED — HOLD STILL'); return; }
 }
-function pushRaw(s){ RAWS.unshift({ t:Date.now(), s }); if(RAWS.length>40) RAWS.pop(); renderRaw(); }
-
-/* QA seam — replay pod frames with no hardware attached. The scoring and
-   learning are the whole point of this build, so they need to be exercisable
-   without a bottle in hand.  __feed.evt('EVT|DECIDE:SIP|PRE:400|...')          */
-window.__feed = { live:onFrame, sip:onSip, evt:onEvt,
-                  state:()=>({ POD, SIPS, DECS, learned:learned(), suggest:suggestMin() }),
-                  score:s=>scoreSip(s) };
+function pushRaw(s){ RAWS.unshift({t:Date.now(),s}); if(RAWS.length>40) RAWS.pop(); renderRaw(); }
 
 /* ══════════════════════════════ render ══════════════════════════════ */
-const fmt = (v,u,d=0) => (v==null || !Number.isFinite(v)) ? '—' : (d?v.toFixed(d):Math.round(v))+(u||'');
-const ago = t => { const s=Math.round((Date.now()-t)/1000);
-  return s<60?s+'s ago':s<3600?Math.round(s/60)+'m ago':Math.round(s/3600)+'h ago'; };
-const clock = t => new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+const fmt=(v,u,d=0)=>(v==null||!Number.isFinite(v))?'—':(d?v.toFixed(d):Math.round(v))+(u||'');
+const clock=t=>new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+const ago=t=>{const s=Math.round((Date.now()-t)/1000);return s<60?s+'S':s<3600?Math.round(s/60)+'M':Math.round(s/3600)+'H';};
 
-function renderAll(){ renderLive(); renderSips(); renderLearn(); renderDecs(); renderCal();
-                      renderPower(); renderDev(); renderRaw(); renderAcct(); }
+function renderAll(){ renderLive(); renderSubs(); renderSips(); renderLearn(); renderDecs();
+  renderCal(); renderCalPts(); renderPower(); renderDev(); renderRaw(); renderAcct(); renderToday(); }
 
 function renderLive(){
-  const c=$('chipConn'), on=POD.connected;
-  c.className='chip'+(on?' on':''); $('chipConnT').textContent = on ? 'connected' : 'offline';
-  $('btnConnect').hidden = on; $('btnDisconnect').hidden = !on;
-  $('sWater').textContent = POD.connected ? fmt(POD.mlPrecise!=null?POD.mlPrecise:POD.ml,' ml', POD.mlPrecise!=null?1:0) : '—';
-  $('sGross').textContent = fmt(POD.gross,' g');
-  $('sState').textContent = POD.state || '—';
-  $('sStill').textContent = POD.connected ? (POD.still?'yes':'moving') : '—';
-  $('sSips').textContent  = POD.sips||0;
-  $('sTotal').textContent = fmt(POD.total,' ml');
-  $('sWin').textContent   = fmt((POD.cfg.win||8000)/1000,' s',0);
-  $('sBase').textContent  = DECS.length && DECS[0].post!=null ? fmt(DECS[0].post,' ml') : '—';
-  /* window progress: SETTLE means the pod is inside its stillness window */
-  const bar=$('winBar');
-  if(POD.state==='SETTLE'){ bar.style.width = Math.min(100, (Date.now()-(POD._settleAt||Date.now()))/(POD.cfg.win||8000)*100)+'%'; }
-  else { POD._settleAt = Date.now(); bar.style.width = POD.state==='IDLE' ? '100%' : '0%'; }
-  const b=$('chipBatt'); const p=POD.batt;
-  b.className='chip'+(p==null?'':p<15?' bad':p<40?' warn':' on');
-  $('chipBattT').textContent = p==null?'—':Math.round(p)+'%'+(POD.chg?' ⚡':'');
+  $('podLabel').textContent = POD.connected ? (POD.name||'POD').slice(0,14).toUpperCase() : 'NO POD';
+  const bars=$('podBars').children, lvl=POD.connected?(Date.now()-POD.lastFrame<6000?4:2):0;
+  for(let i=0;i<4;i++) bars[i].style.background = i<lvl ? 'var(--acc)' : 'var(--mut2)';
+
+  /* the banner reports real subsystem health — the design's simulate-fault tap is not real behaviour */
+  const st=podStatus(), b=$('banner');
+  b.style.background = st.k==='ok' ? 'oklch(74% 0.15 150 / 0.12)' : st.k==='warn' ? 'oklch(80% 0.15 85 / 0.12)'
+    : st.k==='fail' ? 'oklch(65% 0.19 25 / 0.12)' : 'var(--card)';
+  b.style.borderColor = st.k==='ok' ? 'oklch(74% 0.15 150 / 0.35)' : st.k==='warn' ? 'oklch(80% 0.15 85 / 0.35)'
+    : st.k==='fail' ? 'oklch(65% 0.19 25 / 0.35)' : 'var(--line)';
+  $('bnHd').textContent=st.head; $('bnHd').style.color=st.col;
+  $('bnDot').style.background=st.col; $('bnLive').style.color=st.col;
+  $('bnLive').textContent = POD.connected?'LIVE':'IDLE';
+  $('bnSub').textContent=st.sub; $('bnHint').textContent=st.hint;
+
+  $('tele').innerHTML = [
+    ['WATER', POD.connected?fmt(POD.mlPrecise!=null?POD.mlPrecise:POD.ml,' ml',POD.mlPrecise!=null?1:0):'—'],
+    ['GROSS', fmt(POD.gross,' g')],
+    ['RAW', POD.raw==null?'—':Math.round(POD.raw).toLocaleString()],
+    ['SCALE', POD.scale==null?'—':POD.scale.toFixed(2)],
+    ['STATE', POD.state||'—'],
+    ['STILL', POD.connected?(POD.still?'YES':'MOVING'):'—'],
+    ['TILT', fmt(POD.tilt,'°')],
+    ['SIPS', String(POD.sips||0)],
+  ].map(([k,v])=>`<div class="tile"><span class="k">${k}</span><span class="v ${String(v).length>7?'sm':''}">${v}</span></div>`).join('');
+
+  const w=POD.mlPrecise!=null?POD.mlPrecise:POD.ml;
+  $('wLabel').textContent = POD.connected?fmt(w,' g',1):'— g';
+  if(WHIST.length>1){
+    const mn=Math.min(...WHIST), mx=Math.max(...WHIST), sp=(mx-mn)||1;
+    $('wSpark').setAttribute('points', WHIST.map((v,i)=>
+      (i/(WHIST.length-1)*300).toFixed(1)+','+(100-(v-mn)/sp*88-6).toFixed(1)).join(' '));
+  }
+  $('sWin').textContent=fmt((POD.cfg.win||8000)/1000,' s');
+  $('sState').textContent=POD.state||'—';
+  $('sStill').textContent=POD.connected?(POD.still?'YES':'MOVING'):'—';
+  $('sBase').textContent=DECS.length&&DECS[0].post!=null?fmt(DECS[0].post,' ml'):'—';
+  $('dLink').textContent=POD.connected?'CONNECTED':'OFFLINE';
+  $('dName').textContent=POD.name||'—';
+}
+function podStatus(){
+  if(!POD.connected) return { k:'idle', col:'var(--mut)', head:'DISCONNECTED',
+    sub:'No pod linked. Tap the chip above to connect.', hint:'BLE · SERVICE 0x180D' };
+  if(POD.cell==='ABSENT'||POD.cell==='NONE') return { k:'fail', col:'var(--bad)', head:'CELL ABSENT',
+    sub:'The amplifier is alive but the bridge reads as unplugged. Volume is simulated until it returns.',
+    hint:'LOAD CELL · HX711' };
+  if(POD.scale===420) return { k:'warn', col:'var(--warn)', head:'NOT CALIBRATED',
+    sub:'Running the factory default 420 counts/g. That is a fallback, not a calibration.', hint:'CAL TAB' };
+  if(POD.batt!=null&&POD.batt<15) return { k:'warn', col:'var(--warn)', head:'BATTERY LOW',
+    sub:'Charge the pod — measurements stay valid but the link will drop when it dies.', hint:'POWER' };
+  return { k:'ok', col:'var(--ok)', head:'NOMINAL', sub:'All subsystems reporting. Weight is live.',
+    hint:'PROTOCOL v'+(POD.ver||'?') };
+}
+function renderSubs(){
+  const S=(n,ok,lab)=>({n, c: ok===null?'var(--mut2)':ok?'var(--ok)':'var(--bad)',
+    t: ok===null?'var(--mut2)':ok?'var(--ok)':'var(--bad)', l:lab});
+  const cellOk = POD.cell==null?null:(POD.cell==='OK');
+  const items=[
+    S('Load cell', cellOk, POD.cell||'—'),
+    S('IMU', POD.imu==null?null:POD.imu, POD.imu==null?'—':POD.imu?'NOMINAL':'FAIL'),
+    S('Haptic', POD.hap==null?null:POD.hap, POD.hap==null?'—':POD.hap?'NOMINAL':'NONE'),
+    S('BLE link', POD.connected, POD.connected?'NOMINAL':'OFFLINE'),
+    S('Battery', POD.batt==null?null:POD.batt>=15, POD.batt==null?'—':Math.round(POD.batt)+'%'),
+    S('Calibration', POD.scale==null?null:POD.scale!==420, POD.scale==null?'—':POD.scale===420?'DEFAULT':'SET'),
+  ];
+  $('subs').innerHTML=items.map(x=>`<div class="sub"><i style="background:${x.c}"></i>`
+    +`<span class="n">${x.n}</span><span class="v" style="color:${x.t}">${x.l}</span></div>`).join('');
+}
+function renderToday(){
+  $('tSips').textContent=POD.sips||0;
+  $('tTotal').textContent=fmt(POD.total,' ml');
+  $('tAvg').textContent=POD.sips?Math.round((POD.total||0)/POD.sips)+' ml':'—';
+  $('tBottle').textContent=POD.connected?fmt(POD.ml,' ml'):'—';
 }
 function renderSips(){
   const el=$('sipList');
-  if(!SIPS.length){ el.innerHTML='<div class="empty">No sips yet. Take one and it lands here.</div>'; return; }
-  el.innerHTML = SIPS.slice(0,25).map((s,i)=>{
-    const sc = scoreSip(s);
-    const answered = s.verdict!==null;
-    return `<div class="sip">
-      <div class="top">
-        <span class="ml">${Math.round(s.ml)} ml</span>
-        <span class="conf ${confClass(sc.score)}">${sc.score}% · ${confWord(sc.score)}</span>
-        <span class="when">${clock(s.t)} · ${ago(s.t)}</span>
-      </div>
-      <div class="meta">
-        bottle <b>${s.pre!=null?Math.round(s.pre):'—'}</b> → <b>${s.post!=null?Math.round(s.post):Math.round(s.vol)}</b> ml
-        · spread <b>${s.sd!=null&&s.sd>=0?s.sd.toFixed(1)+' ml':'—'}</b>
-        · <b>${s.n!=null?s.n:'—'}</b> samples over <b>${Math.round((s.win||8000)/1000)}s</b>
-        ${sc.why.length?'<br>'+sc.why.join(' · '):''}
-      </div>
-      ${answered
-        ? `<div class="verdict"><div class="done">${s.verdict?'✓ you confirmed this was a sip':'✗ you said this was not a sip'} · <a href="#" data-clear="${i}" style="color:var(--dim)">undo</a></div></div>`
-        : `<div class="verdict">
-             <button class="yes" data-yes="${i}">✓ Yes, a sip</button>
-             <button class="no"  data-no="${i}">✗ Not a sip</button>
-           </div>`}
-    </div>`;
+  if(!SIPS.length){ el.innerHTML='<div class="empty">NO SIPS YET</div>'; return; }
+  el.innerHTML=SIPS.slice(0,25).map((s,i)=>{
+    const sc=scoreSip(s), done=s.verdict!==null;
+    return `<div class="sip"><div class="top"><span class="ml">${Math.round(s.ml)} ml</span>`
+      +`<span class="conf ${confClass(sc.score)}">${sc.score}% · ${confWord(sc.score)}</span>`
+      +`<span class="when">${clock(s.t)} · ${ago(s.t)}</span></div>`
+      +`<div class="meta">${s.pre!=null?Math.round(s.pre):'—'} → <b>${s.post!=null?Math.round(s.post):Math.round(s.vol)}</b> ml`
+      +` · spread <b>${s.sd!=null&&s.sd>=0?s.sd.toFixed(1):'—'}</b>`
+      +` · <b>${s.n!=null?s.n:'—'}</b>/${Math.round((s.win||8000)/500)} samples`
+      +`${sc.why.length?'<br>'+sc.why.join(' · '):''}</div>`
+      +(done?`<div class="vd"><div class="done">${s.verdict?'✓ CONFIRMED':'✗ NOT A SIP'} · <a data-clear="${i}">UNDO</a></div></div>`
+            :`<div class="vd"><button class="yes" data-yes="${i}">✓ YES, A SIP</button>`
+             +`<button class="no" data-no="${i}">✗ NOT A SIP</button></div>`)+`</div>`;
   }).join('');
   el.querySelectorAll('[data-yes]').forEach(b=>b.onclick=()=>mark(+b.dataset.yes,true));
   el.querySelectorAll('[data-no]').forEach(b=>b.onclick=()=>mark(+b.dataset.no,false));
-  el.querySelectorAll('[data-clear]').forEach(a=>a.onclick=e=>{ e.preventDefault(); mark(+a.dataset.clear,null); });
+  el.querySelectorAll('[data-clear]').forEach(a=>a.onclick=()=>mark(+a.dataset.clear,null));
 }
-function mark(i, v){ if(!SIPS[i]) return; SIPS[i].verdict=v; saveState(); renderSips(); renderLearn(); }
-
+function mark(i,v){ if(!SIPS[i]) return; SIPS[i].verdict=v; saveState(); renderSips(); renderLearn(); }
 function renderLearn(){
   const L=learned();
-  $('lYes').textContent = L.n; $('lNo').textContent = L.nNo;
-  $('lMean').textContent = L.mean==null ? '—' : Math.round(L.mean)+' ml'+(L.sd?' ±'+L.sd.toFixed(1):'');
-  $('lRange').textContent = L.lo==null ? '—' : Math.round(L.lo)+'–'+Math.round(L.hi)+' ml';
-  const s = suggestMin();
-  $('lAdvice').textContent = s.msg;
-  const b=$('btnApplyLearn');
-  b.disabled = !s.ok;
-  b.textContent = s.ok ? ('Apply suggested minimum — '+s.value+' ml') : 'Apply suggested minimum to pod';
-  b.dataset.v = s.ok ? s.value : '';
+  $('lYes').textContent=L.n; $('lNo').textContent=L.nNo;
+  $('lMean').textContent=L.mean==null?'—':Math.round(L.mean)+(L.sd?' ±'+L.sd.toFixed(1):'');
+  $('lRange').textContent=L.lo==null?'—':Math.round(L.lo)+'–'+Math.round(L.hi);
+  const s=suggestMin(); $('lAdvice').textContent=s.msg;
+  const b=$('btnApplyLearn'); b.disabled=!s.ok; b.dataset.v=s.ok?s.value:'';
+  b.textContent=s.ok?('APPLY SUGGESTED MINIMUM — '+s.value+' ML'):'APPLY SUGGESTED MINIMUM';
 }
 function renderDecs(){
   const el=$('decList');
-  if(!DECS.length){ el.innerHTML='<div class="empty">Nothing decided yet.</div>'; return; }
-  el.innerHTML = DECS.slice(0,20).map(d=>{
-    const cls = d.verdict==='SIP'?'sip':d.verdict==='REFILL'?'refill':'none';
-    return `<div class="logline ${cls} mono">${clock(d.t)} · <b>${d.verdict}</b>`
-      + ` · ${d.pre!=null?Math.round(d.pre):'—'}→${d.post!=null?Math.round(d.post):'—'} ml`
-      + ` · Δ${Math.round(d.d)} · spread ${d.sd!=null&&d.sd>=0?d.sd.toFixed(1):'—'}`
-      + ` · n=${d.n!=null?d.n:'—'}${d.why?' · '+d.why:''}</div>`;
+  if(!DECS.length){ el.innerHTML='<div class="empty">NOTHING DECIDED YET</div>'; return; }
+  el.innerHTML=DECS.slice(0,20).map(d=>{
+    const c=d.verdict==='SIP'?'sip':d.verdict==='REFILL'?'refill':'none';
+    return `<div class="line ${c}">${clock(d.t)} · <b>${d.verdict}</b> · `
+      +`${d.pre!=null?Math.round(d.pre):'—'}→${d.post!=null?Math.round(d.post):'—'} ml · Δ${Math.round(d.d)}`
+      +` · sd ${d.sd!=null&&d.sd>=0?d.sd.toFixed(1):'—'} · n=${d.n!=null?d.n:'—'}${d.why?' · '+d.why:''}</div>`;
   }).join('');
 }
 function renderCal(){
-  $('cRaw').textContent   = POD.raw==null?'—':Math.round(POD.raw).toLocaleString();
-  $('cTare').textContent  = POD.tare==null?'—':Math.round(POD.tare).toLocaleString();
-  $('cScale').textContent = POD.scale==null?'—':POD.scale.toFixed(2);
-  $('cReads').textContent = (POD.raw!=null&&POD.tare!=null&&POD.scale)
-    ? ((POD.raw-POD.tare)/POD.scale).toFixed(1)+' g' : '—';
+  $('cRaw').textContent=POD.raw==null?'—':Math.round(POD.raw).toLocaleString();
+  $('cTare').textContent=POD.tare==null?'—':Math.round(POD.tare).toLocaleString();
+  $('cScale').textContent=POD.scale==null?'—':POD.scale.toFixed(2);
+  $('cReads').textContent=(POD.raw!=null&&POD.tare!=null&&POD.scale)?((POD.raw-POD.tare)/POD.scale).toFixed(1)+' g':'—';
   const w=$('cWarn');
-  if(POD.scale===420){ w.innerHTML='<b style="color:var(--warn)">This pod is on the factory default '
-    + 'scale (420 counts/g). That is not a calibration — it is the fallback after a chip erase. '
-    + 'Run steps 1 and 2, or pin a known pair.</b>'; }
-  else if(POD.scale!=null){ w.textContent='Calibration is persisted on the pod and survives a sketch '
-    + 'upload. A full chip erase wipes it — note the pair above so you can pin it back.'; }
+  if(POD.scale===420) w.innerHTML='<b style="color:var(--warn)">Factory default 420 counts/g — this pod is '
+    +'not calibrated. Capture two points below, or pin a known pair.</b>';
+  else if(POD.scale!=null) w.textContent='Persisted on the pod; survives a sketch upload. A full chip erase '
+    +'wipes it — note the pair so you can pin it back.';
   else w.textContent='';
+  $('fCell').textContent=POD.cell||'—'; $('fVer').textContent=POD.ver?('v'+POD.ver):'—';
+}
+function renderCalPts(){
+  const el=$('calPts');
+  el.innerHTML = CALPTS.length
+    ? CALPTS.map((p,i)=>`<div class="kvr"><span class="n" style="font-family:var(--mono);font-size:11.5px">`
+      +`#${i+1} · ${p.g} g</span><span class="v">${Math.round(p.raw).toLocaleString()}</span>`
+      +`<button class="btn" data-del="${i}" style="margin:0;width:auto;padding:4px 9px;font-size:9px">DEL</button></div>`).join('')
+    : '<div class="empty">NO POINTS CAPTURED</div>';
+  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ CALPTS.splice(+b.dataset.del,1); saveState(); renderCalPts(); });
+  const f=calFit();
+  $('fitGain').textContent=f?f.gain.toFixed(2):'—';
+  $('fitOff').textContent=f?Math.round(f.off).toLocaleString():'—';
+  $('fitR2').textContent=f?f.r2.toFixed(4):'—';
+  $('fitRes').textContent=f&&f.resG!=null?f.resG.toFixed(2)+' g':'—';
+  $('btnApplyCal').disabled=!f;
+  /* curve: points + fitted line, scaled to the captured range */
+  const svg=$('calDots'), line=$('calFit');
+  if(!f||!CALPTS.length){ svg.innerHTML=''; line.setAttribute('points',''); return; }
+  const gs=CALPTS.map(p=>p.g), rs=CALPTS.map(p=>p.raw);
+  const g0=Math.min(0,...gs), g1=Math.max(...gs)||1, r0=Math.min(...rs,f.off), r1=Math.max(...rs)||1;
+  const X=g=>((g-g0)/((g1-g0)||1))*290+5, Y=r=>115-((r-r0)/((r1-r0)||1))*105;
+  line.setAttribute('x1',X(g0)); line.setAttribute('y1',Y(f.gain*g0+f.off));
+  line.setAttribute('x2',X(g1)); line.setAttribute('y2',Y(f.gain*g1+f.off));
+  svg.innerHTML=CALPTS.map(p=>`<circle cx="${X(p.g).toFixed(1)}" cy="${Y(p.raw).toFixed(1)}" r="3.5" `
+    +`fill="oklch(97% 0.006 230)" stroke="oklch(74% 0.11 226)" stroke-width="1.5"/>`).join('');
 }
 function renderPower(){
-  $('bPct').textContent   = fmt(POD.batt,'%');
-  $('bV').textContent     = fmt(POD.vbat,' V',2);
-  $('bMa').textContent    = fmt(POD.ma,' mA',1);
-  $('bDrain').textContent = POD.drainPh==null||POD.drainPh<=0 ? 'learning…' : POD.drainPh.toFixed(1)+' %/h';
-  /* hours left from the pod's own learned drain rate, not a guess from capacity */
-  if(POD.drainPh>0 && POD.batt!=null){
-    const h = POD.batt/POD.drainPh;
-    $('bEta').textContent = h>=24 ? (h/24).toFixed(1)+' d' : h>=1 ? h.toFixed(1)+' h' : Math.round(h*60)+' m';
-  } else $('bEta').textContent = '—';
-  $('bChg').textContent   = POD.chg ? ('yes · '+(POD.chgCur||'—')+' mA') : (POD.usb?'usb, not charging':'no');
-  $('bChgEta').textContent= (POD.chg && POD.chgEta) ? (POD.chgEta>=60 ? (POD.chgEta/60).toFixed(1)+' h' : POD.chgEta+' m') : '—';
-  $('bCap').textContent   = fmt(POD.cap,' mAh');
-  const p=POD.pw||[];
-  const set=(id,v)=>$(id).textContent = (v==null||!Number.isFinite(v))?'—':v.toFixed(1)+' mA';
-  set('pBoard',p[1]); set('pBle',p[2]); set('pCell',p[3]); set('pImu',p[4]); set('pLed',p[5]); set('pHap',p[6]);
+  $('bPct').textContent=fmt(POD.batt,'%');
+  $('bV').textContent=fmt(POD.vbat,' V',2);
+  $('bMa').textContent=fmt(POD.ma,' mA',1);
+  $('bDrain').textContent=(POD.drainPh==null||POD.drainPh<=0)?'LEARNING':POD.drainPh.toFixed(1)+' %/h';
+  if(POD.drainPh>0&&POD.batt!=null){ const h=POD.batt/POD.drainPh;
+    $('bEta').textContent=h>=24?(h/24).toFixed(1)+' d':h>=1?h.toFixed(1)+' h':Math.round(h*60)+' m';
+  } else $('bEta').textContent='—';
+  $('bChg').textContent=POD.chg?('YES · '+(POD.chgCur||'—')+' mA'):(POD.usb?'USB IDLE':'NO');
+  $('bChgEta').textContent=(POD.chg&&POD.chgEta)?(POD.chgEta>=60?(POD.chgEta/60).toFixed(1)+' h':POD.chgEta+' m'):'—';
+  $('bCap').textContent=fmt(POD.cap,' mAh');
+  const p=POD.pw||[], names=['','BOARD','BLE','CELL','IMU','LED','HAPTIC'];
+  $('pwGrid').innerHTML=[1,2,3,4,5,6].map(i=>`<div class="sub"><i style="background:var(--acc)"></i>`
+    +`<span class="n">${names[i]}</span><span class="v" style="color:var(--ink3)">`
+    +`${(p[i]==null||!Number.isFinite(p[i]))?'—':p[i].toFixed(1)+' mA'}</span></div>`).join('');
+  document.querySelectorAll('[data-ps]').forEach(b=>
+    b.classList.toggle('on', POD.connected && ['AUTO','ON','OFF'][POD.ps[0]]===b.dataset.ps));
 }
 function renderDev(){
-  $('dUp').textContent  = POD.up ? (POD.up>=3600?(POD.up/3600).toFixed(1)+' h':Math.round(POD.up/60)+' m') : '—';
-  $('dRR').textContent  = POD.rr || '—';
-  $('dPs').textContent  = POD.connected ? (['AUTO','ON','OFF'][POD.ps[0]]||'—')+(POD.ps[1]?' · active':'') : '—';
-  $('dUsb').textContent = POD.connected ? (POD.usb?'plugged':'battery') : '—';
+  $('dUp').textContent=POD.up?(POD.up>=3600?(POD.up/3600).toFixed(1)+' h':Math.round(POD.up/60)+' m'):'—';
+  $('dRR').textContent=POD.rr||'—';
+  $('dPs').textContent=POD.connected?(['AUTO','ON','OFF'][POD.ps[0]]||'—')+(POD.ps[1]?' · ACTIVE':''):'—';
+  $('dUsb').textContent=POD.connected?(POD.usb?'PLUGGED':'BATTERY'):'—';
 }
 function renderRaw(){
   const el=$('rawList');
-  if(!dbgOn){ el.innerHTML='<div class="empty">Diagnostics off.</div>'; return; }
-  if(!RAWS.length){ el.innerHTML='<div class="empty">Waiting for frames…</div>'; return; }
-  el.innerHTML = RAWS.map(r=>`<div class="logline mono">${clock(r.t)} ${r.s}</div>`).join('');
+  if(!dbgOn){ el.innerHTML='<div class="empty">DIAGNOSTICS OFF</div>'; return; }
+  el.innerHTML=RAWS.length?RAWS.map(r=>`<div class="line">${clock(r.t)} ${r.s}</div>`).join('')
+    :'<div class="empty">WAITING FOR FRAMES</div>';
 }
 function renderAcct(){
-  const u = (ORQA.auth && ORQA.auth.user) || null;
-  $('aWho').textContent  = u ? (u.name||u.email) : '—';
-  $('aRole').textContent = (ORQA.auth && ORQA.auth.role) || '—';
+  const u=(ORQA.auth&&ORQA.auth.user)||null;
+  $('aWho').textContent=u?(u.name||u.email):'—';
+  $('aRole').textContent=((ORQA.auth&&ORQA.auth.role)||'—').toUpperCase();
 }
 
 /* ══════════════════════════════ wiring ══════════════════════════════ */
-$('tabHome').onclick = ()=>{ $('home').hidden=false; $('settings').hidden=true;
-  $('tabHome').classList.add('sel'); $('tabSet').classList.remove('sel'); };
-$('tabSet').onclick  = ()=>{ $('home').hidden=true; $('settings').hidden=false;
-  $('tabSet').classList.add('sel'); $('tabHome').classList.remove('sel'); renderAcct(); };
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  const t=b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  ['Dash','Cal','Sip','Set'].forEach(n=>$('sc'+n).hidden = n!==t);
+  if(t==='Set') renderAcct();
+});
+$('podBtn').onclick=connect;
+$('btnForget').onclick=disconnect;
 
-$('btnConnect').onclick    = connect;
-$('btnDisconnect').onclick = disconnect;
-
-$('btnTare').onclick = ()=>{ if(!POD.still) return toast('Hold it still first');
-  if(cmd('TARE')) toast('Taring — keep it still, this takes a few seconds'); };
-$('btnCalw').onclick = ()=>{ const g=Math.round(+$('calRef').value);
-  if(!(g>=20&&g<=5000)) return toast('Reference must be 20–5000 g');
-  if(!POD.still) return toast('Hold it still first');
-  if(cmd('CALW:'+g)) toast('Calibrating against '+g+' g — keep it still'); };
-$('btnCalRead').onclick = ()=>{ if(!cmd('CAL')) return;
+$('btnTare').onclick=()=>{ if(!POD.still) return toast('HOLD IT STILL FIRST');
+  if(cmd('TARE')) toast('TARING — KEEP STILL'); };
+$('btnCapture').onclick=()=>{ if(POD.raw==null) return toast('NO RAW READING — CONNECT + ENABLE DIAGNOSTICS');
+  $('calRaw').value=Math.round(POD.raw); toast('CAPTURED '+Math.round(POD.raw)); };
+$('btnAddPt').onclick=()=>{ const g=+$('calKnown').value, r=+$('calRaw').value;
+  if(!Number.isFinite(g)||!Number.isFinite(r)) return toast('ENTER KNOWN GRAMS AND RAW');
+  CALPTS.push({g, raw:r}); CALPTS.sort((a,b)=>a.g-b.g); saveState(); renderCalPts();
+  $('calKnown').value=''; $('calRaw').value=''; toast('POINT ADDED'); };
+$('btnResetCal').onclick=()=>{ CALPTS=[]; saveState(); renderCalPts(); toast('POINTS CLEARED'); };
+$('btnApplyCal').onclick=()=>{ const f=calFit(); if(!f) return;
+  if(!(f.gain>=20&&f.gain<=20000)) return toast('FIT GAIN OUT OF RANGE — CHECK POINTS');
+  if(cmd('CAL:'+Math.round(f.off)+':'+f.gain.toFixed(2)))
+    toast('APPLIED · GAIN '+f.gain.toFixed(2)+' OFFSET '+Math.round(f.off)); };
+$('btnCalRead').onclick=()=>{ if(!cmd('CAL')) return;
   setTimeout(()=>{ if(POD.tare!=null) $('pinTare').value=Math.round(POD.tare);
-                   if(POD.scale!=null) $('pinScale').value=POD.scale.toFixed(2); }, 500); };
-$('btnCalPin').onclick = ()=>{ const t=Math.round(+$('pinTare').value), s=+$('pinScale').value;
-  if(!Number.isFinite(t)||!Number.isFinite(s)||!(s>=20&&s<=20000)) return toast('Enter a tare and a scale between 20 and 20000');
-  if(cmd('CAL:'+t+':'+s.toFixed(2))) toast('Pinned tare '+t+' · scale '+s.toFixed(2)); };
+                   if(POD.scale!=null) $('pinScale').value=POD.scale.toFixed(2); },500); };
+$('btnCalPin').onclick=()=>{ const t=Math.round(+$('pinTare').value), s=+$('pinScale').value;
+  if(!Number.isFinite(t)||!Number.isFinite(s)||!(s>=20&&s<=20000)) return toast('TARE + SCALE 20–20000');
+  if(cmd('CAL:'+t+':'+s.toFixed(2))) toast('PINNED'); };
 
-$('btnSipCfg').onclick = ()=>{
-  const win = Math.round(+$('setWin').value)*1000, min = Math.round(+$('setMin').value);
-  if(!(win>=3000&&win<=20000)) return toast('Window must be 3–20 seconds');
-  if(!(min>=1&&min<=50)) return toast('Minimum must be 1–50 ml');
-  /* SIPCFG takes all five; tilt/minMs/maxMs no longer affect detection but the
-     command still expects them, so send the pod's current values back. */
-  if(cmd('SIPCFG:35:500:8000:'+min+':'+win)) toast('Saved to pod');
-};
-$('btnApplyLearn').onclick = e=>{ const v=+e.target.dataset.v; if(!v) return;
-  if(cmd('SIPCFG:35:500:8000:'+v+':'+(POD.cfg.win||8000))){ toast('Minimum set to '+v+' ml'); } };
-$('btnResetLearn').onclick = ()=>{ SIPS.forEach(s=>s.verdict=null); saveState(); renderSips(); renderLearn();
-  toast('Corrections cleared — the sips themselves are kept'); };
+$('btnSipCfg').onclick=()=>{ const win=Math.round(+$('setWin').value)*1000, min=Math.round(+$('setMin').value);
+  if(!(win>=3000&&win<=20000)) return toast('WINDOW 3–20 S');
+  if(!(min>=1&&min<=50)) return toast('MINIMUM 1–50 ML');
+  if(cmd('SIPCFG:35:500:8000:'+min+':'+win)) toast('SAVED TO POD'); };
+$('btnApplyLearn').onclick=e=>{ const v=+e.currentTarget.dataset.v; if(!v) return;
+  if(cmd('SIPCFG:35:500:8000:'+v+':'+(POD.cfg.win||8000))) toast('MINIMUM SET TO '+v+' ML'); };
+$('btnResetLearn').onclick=()=>{ SIPS.forEach(s=>s.verdict=null); saveState(); renderSips(); renderLearn();
+  toast('CORRECTIONS CLEARED'); };
 
-$('btnGoal').onclick = ()=>{ const g=Math.round(+$('setGoal').value);
-  if(!(g>=100&&g<=20000)) return toast('Goal must be 100–20000 ml');
-  if(cmd('SETGOAL:'+g)) toast('Goal set'); };
-$('btnDayReset').onclick = ()=>{ if(cmd('RESETDAY')) toast('Counters reset'); };
-$('btnRestart').onclick  = ()=>{ if(cmd('RESTART')) toast('Pod restarting'); };
-$('btnDbg').onclick = ()=>{ dbgOn=!dbgOn; cmd('DBG:'+(dbgOn?1:0));
-  $('btnDbg').textContent = dbgOn?'Disable diagnostic frames':'Enable diagnostic frames'; renderRaw(); };
-$('btnLogout').onclick = ()=>{ try{ ORQA.auth && ORQA.auth.signOut && ORQA.auth.signOut(); }
-  catch(e){ location.reload(); } };
+$('btnGoal').onclick=()=>{ const g=Math.round(+$('setGoal').value);
+  if(!(g>=100&&g<=20000)) return toast('GOAL 100–20000 ML');
+  if(cmd('SETGOAL:'+g)) toast('GOAL SET'); };
+$('btnDayReset').onclick=()=>{ if(cmd('RESETDAY')) toast('COUNTERS RESET'); };
+$('btnRestart').onclick=()=>{ if(cmd('RESTART')) toast('POD RESTARTING'); };
+$('btnDbg').onclick=()=>{ dbgOn=!dbgOn; cmd('DBG:'+(dbgOn?1:0));
+  $('btnDbg').textContent=dbgOn?'ON':'OFF'; renderRaw(); };
+$('btnLogout').onclick=()=>{ try{ ORQA.auth&&ORQA.auth.signOut&&ORQA.auth.signOut(); }catch(e){ location.reload(); } };
+$('btnExport').onclick=()=>{
+  const blob=new Blob([JSON.stringify({ exported:new Date().toISOString(), pod:POD, sips:SIPS,
+    decisions:DECS, calPoints:CALPTS, fit:calFit(), learned:learned() },null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='lc1-debug-'+Date.now()+'.json'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000); toast('DEBUG LOG EXPORTED'); };
 
-/* link age → drop the connection chip if frames stop */
-setInterval(()=>{ if(POD.connected && Date.now()-POD.lastFrame > 6000){
-  $('chipConn').className='chip warn'; $('chipConnT').textContent='no frames'; } }, 2000);
-setInterval(renderLive, 250);        /* the stillness bar wants to move smoothly */
+/* LED — real GLOW writes, not a mock */
+const LEDPAL=['oklch(74% 0.11 226)','oklch(65% 0.19 25)','oklch(78% 0.15 55)','oklch(80% 0.15 85)',
+  'oklch(74% 0.15 150)','oklch(75% 0.13 178)','oklch(70% 0.15 260)','oklch(72% 0.15 300)',
+  'oklch(72% 0.16 330)','oklch(90% 0.01 230)'];
+const LEDHEX=['46e0d2','ff5a5a','ff8f3f','ffc65a','4ade80','2dd4bf','6366f1','a855f7','ec4899','e8f4f8'];
+let ledCol=0;
+$('ledSw').innerHTML=LEDPAL.map((c,i)=>`<button data-led="${i}" style="width:22px;height:22px;border-radius:11px;`
+  +`background:${c};border:1px solid oklch(95% 0.01 230 / ${i===0?'0.6':'0.2'});cursor:pointer;padding:0"></button>`).join('');
+function ledApply(){ const b=Math.round(+$('ledBri').value);
+  const hex=LEDHEX[ledCol]; if(cmd('GLOW:0x'+hex)) toast('GLOW #'+hex.toUpperCase()+' · '+b+'%'); }
+$('ledSw').querySelectorAll('[data-led]').forEach(b=>b.onclick=()=>{ ledCol=+b.dataset.led;
+  $('ledSw').querySelectorAll('[data-led]').forEach((x,i)=>
+    x.style.borderColor='oklch(95% 0.01 230 / '+(i===ledCol?'0.6':'0.2')+')');
+  ledApply(); });
+$('ledBri').onchange=ledApply;
+document.querySelectorAll('[data-glow]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('[data-glow]').forEach(x=>x.classList.toggle('on',x===b));
+  const m=b.dataset.glow;
+  if(m==='off') cmd('GLOW:OFF'); else if(m==='auto') cmd('GLOW:AUTO');
+  else if(m==='show') cmd('SHOW'); else ledApply(); });
+document.querySelectorAll('[data-ps]').forEach(b=>b.onclick=()=>{
+  if(cmd('POWERSAVE:'+b.dataset.ps)) toast('POWER MODE '+b.dataset.ps); });
+
+setInterval(renderLive, 400);
+setInterval(()=>{ if(POD.connected&&Date.now()-POD.lastFrame>6000) renderLive(); }, 2000);
+
+/* QA seam — replay pod frames with no hardware attached */
+window.__feed={ live:onFrame, sip:onSip, evt:onEvt, score:s=>scoreSip(s),
+  state:()=>({POD,SIPS,DECS,CALPTS,learned:learned(),suggest:suggestMin(),fit:calFit()}) };
 
 loadState(); renderAll();
 </script>
 
 <script type="module">
-/* ══════════════════ AUTH GATE — lifted from index-v2.html ══════════════════
-   Same Supabase project, same demo accounts, same roles. v3 asked for "the same
-   sign-in, nothing more", so this is deliberately unmodified apart from the
-   hooks it calls back into. Storage stays under the orqaV3 key, so signing in
-   here cannot overwrite v2's data.
-   The anon key is public by design — RLS in db/schema.sql is what protects data. */
+/* AUTH — same Supabase project, accounts and roles as index-v2. Unmodified apart
+   from the hooks. Storage stays under orqaV3 so this cannot overwrite v2's data.
+   The anon key is public by design; RLS in db/schema.sql protects the data. */
 const ORQA = window.ORQA;
-const ORQA_CFG = { supabaseUrl: 'https://akffjyxjuzqbtbyghfct.supabase.co', supabaseAnonKey: 'sb_publishable_plKpVqZrSuCC-KQjAdurRA_xUWtNmP8', localAuth: true };
+const ORQA_CFG = { supabaseUrl:'https://akffjyxjuzqbtbyghfct.supabase.co', supabaseAnonKey:'sb_publishable_plKpVqZrSuCC-KQjAdurRA_xUWtNmP8', localAuth:true };
 const ORQA_ACCOUNTS = [
   { email:'superadmin@orqa.app', password:'super1234',   role:'superadmin', name:'Super Admin' },
   { email:'admin@orqa.app',      password:'admin1234',   role:'admin',      name:'Admin' },
@@ -799,39 +974,33 @@ const ORQA_ACCOUNTS = [
   { email:'tester@orqa.app',     password:'test1234',    role:'user',       name:'Beta Tester' }
 ];
 const ORQA_ROLE_RANK = { guest:0, user:1, service:2, admin:3, superadmin:4 };
-
 ORQA.auth = (function(){
-  const cfg = ORQA_CFG;
-  const supaEnabled  = () => !!(cfg.supabaseUrl && cfg.supabaseAnonKey);
-  const localEnabled = () => !!cfg.localAuth || /(?:^|[?&])auth=1(?:&|$)/.test(location.search);
+  const cfg=ORQA_CFG, supaEnabled=()=>!!(cfg.supabaseUrl&&cfg.supabaseAnonKey);
+  const localEnabled=()=>!!cfg.localAuth||/(?:^|[?&])auth=1(?:&|$)/.test(location.search);
   let sb=null, gateEl=null, pending={}, pushT=null;
   const LS='orqaAuthV3';
-
-  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role', api.role);
+  function applyRole(u){ api.user=u; api.role=(u&&u.role)||'guest'; document.body.setAttribute('data-role',api.role);
     try{ if(window.__loadAccount) window.__loadAccount(u&&u.email); }catch(e){} }
-
   function buildGate(){
     if(gateEl) return gateEl;
     const g=document.createElement('div'); g.id='authGate';
-    g.innerHTML = '<div class="agCard">'
-      + '<div class="agBrand">ORQA</div>'
-      + '<div class="agSub">Sign in to continue</div>'
-      + '<input id="agEmail" type="email" placeholder="email" autocomplete="email">'
-      + '<input id="agPass" type="password" placeholder="password" autocomplete="current-password">'
-      + '<div id="agErr" class="agErr"></div>'
-      + '<button id="agSignIn" class="agBtn primary">Sign in</button>'
-      + '<button id="agSignUp" class="agBtn">Create account</button>'
-      + '<button id="agGuest" class="agGhost">Continue as guest (this device only)</button>'
-      + '</div>';
+    g.innerHTML='<div class="agCard"><div class="agBrand">[LC1]</div>'
+      +'<div class="agSub">SIGN IN TO CONTINUE</div>'
+      +'<input id="agEmail" type="email" placeholder="email" autocomplete="email">'
+      +'<input id="agPass" type="password" placeholder="password" autocomplete="current-password">'
+      +'<div id="agErr" class="agErr"></div>'
+      +'<button id="agSignIn" class="agBtn primary">SIGN IN</button>'
+      +'<button id="agSignUp" class="agBtn">CREATE ACCOUNT</button>'
+      +'<button id="agGuest" class="agGhost">Continue as guest (this device only)</button></div>';
     document.body.appendChild(g); gateEl=g;
     const q=id=>g.querySelector('#'+id), err=m=>{ q('agErr').textContent=m||''; };
-    const busy=on=>g.querySelector('.agCard').classList.toggle('agBusy', on);
+    const busy=on=>g.querySelector('.agCard').classList.toggle('agBusy',on);
     const creds=()=>({ email:(q('agEmail').value||'').trim().toLowerCase(), password:q('agPass').value||'' });
     q('agSignIn').onclick=async()=>{ const c=creds(); if(!c.email||!c.password) return err('Enter email + password');
       busy(true); err('');
-      const localMatch=()=>ORQA_ACCOUNTS.find(x=>x.email===c.email && x.password===c.password);
+      const localMatch=()=>ORQA_ACCOUNTS.find(x=>x.email===c.email&&x.password===c.password);
       try{
-        if(supaEnabled() && sb){ const {error}=await sb.auth.signInWithPassword(c);
+        if(supaEnabled()&&sb){ const {error}=await sb.auth.signInWithPassword(c);
           if(error){ const a=localMatch(); if(a) localSignIn(a); else err(error.message); } }
         else { const a=localMatch(); if(a) localSignIn(a); else err('Invalid credentials'); }
       }catch(e){ const a=localMatch(); if(a) localSignIn(a); else err(e.message||'Sign-in failed'); }
@@ -841,54 +1010,49 @@ ORQA.auth = (function(){
         busy(true); err(''); try{ const {error}=await sb.auth.signUp(c); if(error) err(error.message);
           else err('Check your email to confirm, then sign in.'); }catch(e){ err(e.message); } finally{ busy(false); } }
       else err('Accounts are provisioned by an admin in test mode.'); };
-    q('agGuest').onclick=()=>{ applyRole({ email:'guest', role:'guest', name:'Guest' }); hideGate(); };
+    q('agGuest').onclick=()=>{ applyRole({email:'guest',role:'guest',name:'Guest'}); hideGate(); };
     return g;
   }
   function showGate(){ buildGate().style.display='flex'; }
   function hideGate(){ if(gateEl) gateEl.style.display='none'; }
-  function localSignIn(a){ const u={ email:a.email, role:a.role, name:a.name };
-    try{ localStorage.setItem(LS, JSON.stringify(u)); }catch(e){}
-    applyRole(u); hideGate(); }
-
-  function queuePush(k,v){ pending[k]=v; clearTimeout(pushT); pushT=setTimeout(flush, 900); }
-  async function flush(){ if(!sb) return; const { data:{ user } } = await sb.auth.getUser(); if(!user) return;
-    const rows=Object.entries(pending).map(([k,v])=>({ user_id:user.id, k, v, updated_at:new Date().toISOString() })); pending={};
-    if(rows.length) try{ await sb.from('app_state').upsert(rows, { onConflict:'user_id,k' }); }catch(e){ console.warn('[sync] push failed', e); } }
-  function makeAdapter(seed){ const cache=Object.assign({}, seed||{});
+  function localSignIn(a){ const u={email:a.email,role:a.role,name:a.name};
+    try{ localStorage.setItem(LS,JSON.stringify(u)); }catch(e){} applyRole(u); hideGate(); }
+  function queuePush(k,v){ pending[k]=v; clearTimeout(pushT); pushT=setTimeout(flush,900); }
+  async function flush(){ if(!sb) return; const {data:{user}}=await sb.auth.getUser(); if(!user) return;
+    const rows=Object.entries(pending).map(([k,v])=>({user_id:user.id,k,v,updated_at:new Date().toISOString()})); pending={};
+    if(rows.length) try{ await sb.from('app_state').upsert(rows,{onConflict:'user_id,k'}); }catch(e){ console.warn('[sync]',e); } }
+  function makeAdapter(seed){ const cache=Object.assign({},seed||{});
     return { name:'supabase', getItem:k=>(k in cache)?cache[k]:null,
              setItem:(k,v)=>{ cache[k]=v; queuePush(k,v); }, removeItem:k=>{ delete cache[k]; queuePush(k,null); } }; }
   async function afterSupaAuth(user){ hideGate(); let seed={};
-    try{ const { data } = await sb.from('app_state').select('k,v').eq('user_id', user.id); (data||[]).forEach(r=>seed[r.k]=r.v); }
-    catch(e){ console.warn('[sync] pull failed', e); }
+    try{ const {data}=await sb.from('app_state').select('k,v').eq('user_id',user.id); (data||[]).forEach(r=>seed[r.k]=r.v); }
+    catch(e){ console.warn('[sync]',e); }
     ORQA.store.use(makeAdapter(seed));
-    const known = ORQA_ACCOUNTS.find(a=>a.email===(user.email||'').toLowerCase());
-    const role = (user.user_metadata&&user.user_metadata.role) || (known&&known.role) || 'user';
-    applyRole({ email:user.email, role, name:(known&&known.name)||user.email }); }
-
+    const known=ORQA_ACCOUNTS.find(a=>a.email===(user.email||'').toLowerCase());
+    const role=(user.user_metadata&&user.user_metadata.role)||(known&&known.role)||'user';
+    applyRole({email:user.email,role,name:(known&&known.name)||user.email}); }
   async function init(){
     const restoreLocal=()=>{ let s=null; try{ s=JSON.parse(localStorage.getItem(LS)||'null'); }catch(e){}
       if(s&&s.role) applyRole(s); else showGate(); };
     if(supaEnabled()){
       try{ const mod=await import('https://esm.sh/@supabase/supabase-js@2');
-        sb=mod.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); ORQA.sb=sb;
-        const { data:{ session } }=await sb.auth.getSession();
+        sb=mod.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey); ORQA.sb=sb;
+        const {data:{session}}=await sb.auth.getSession();
         if(session&&session.user) afterSupaAuth(session.user); else restoreLocal();
         sb.auth.onAuthStateChange((_e,se)=>{ if(se&&se.user) afterSupaAuth(se.user); });
-      }catch(e){ console.warn('[auth] supabase unreachable — using local accounts', e); restoreLocal(); }
-      return;
-    }
+      }catch(e){ console.warn('[auth] supabase unreachable',e); restoreLocal(); }
+      return; }
     if(localEnabled()){ let s=null; try{ s=JSON.parse(localStorage.getItem(LS)||'null'); }catch(e){}
       if(s&&s.role) applyRole(s); else showGate(); return; }
-    applyRole({ email:'local', role:'superadmin', name:'Local' });
+    applyRole({email:'local',role:'superadmin',name:'Local'});
   }
-
-  const api = { init, supaEnabled, localEnabled, user:null, role:'guest',
-    can:(min)=> (ORQA_ROLE_RANK[api.role]||0) >= (ORQA_ROLE_RANK[min]||99),
-    isPrivileged:()=> (ORQA_ROLE_RANK[api.role]||0) >= ORQA_ROLE_RANK.service,
-    signOut: async()=>{ try{ localStorage.removeItem(LS); }catch(e){} try{ if(sb) await sb.auth.signOut(); }catch(e){} location.reload(); } };
+  const api={ init, supaEnabled, localEnabled, user:null, role:'guest',
+    can:m=>(ORQA_ROLE_RANK[api.role]||0)>=(ORQA_ROLE_RANK[m]||99),
+    isPrivileged:()=>(ORQA_ROLE_RANK[api.role]||0)>=ORQA_ROLE_RANK.service,
+    signOut:async()=>{ try{ localStorage.removeItem(LS); }catch(e){} try{ if(sb) await sb.auth.signOut(); }catch(e){} location.reload(); } };
   return api;
 })();
-try{ ORQA.auth.init(); }catch(e){ console.warn('[auth]', e); }
+try{ ORQA.auth.init(); }catch(e){ console.warn('[auth]',e); }
 </script>
 
 </body>
