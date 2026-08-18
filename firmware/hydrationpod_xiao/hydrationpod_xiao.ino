@@ -88,7 +88,18 @@ using namespace Adafruit_LittleFS_Namespace;
 #define DEF_SIP_MIN_MS     500
 #define DEF_SIP_MAX_MS     8000
 #define DEF_SIP_MIN_ML     5
-#define DEF_SETTLE_MS      900
+#define DEF_SETTLE_MS      8000   /* v13: the STILL window a weigh must survive  */
+
+/* ------------------------------------------------- v13 drink measurement ----
+ * Measurement is driven by STILLNESS, not by the tilt gesture. Picking the
+ * bottle up and putting it down swings the cell hard; the old 900 ms settle
+ * measured while it was still moving, and the leftover swing read as a sip or
+ * a toss-out. Now: motion means the weight is untrustworthy, and a reading only
+ * counts once the IMU has been still and upright for DEF_SETTLE_MS.            */
+#define STILL_ACC_TOL      0.05f  /* |accel| may deviate this much from 1 g     */
+#define SIP_WIN_SAMPLE_MS   500   /* weigh cadence inside the still window      */
+#define SIP_MAX_ML          400   /* a single sip larger than this is not a sip */
+#define REFILL_MIN_ML        20   /* weight GAIN this large is a refill         */
 static uint16_t sipTilt   = DEF_SIP_TILT;     /* arm the gesture above this tilt      */
 static uint16_t sipMinMs  = DEF_SIP_MIN_MS;   /* shortest tilt that can be a sip      */
 static uint16_t sipMaxMs  = DEF_SIP_MAX_MS;   /* longest                              */
@@ -1100,7 +1111,9 @@ static void cfgLoad()
     if (c.sipMinMs >= 100 && c.sipMinMs <= 3000) sipMinMs = c.sipMinMs;
     if (c.sipMaxMs >= 2000 && c.sipMaxMs <= 20000) sipMaxMs = c.sipMaxMs;
     if (c.sipMinMl >= 1 && c.sipMinMl <= 50) sipMinMl = c.sipMinMl;
-    if (c.settleMs >= 300 && c.settleMs <= 3000) settleMs = c.settleMs;
+    /* v13: the window is now the 8 s stillness gate, not a 900 ms post-tilt
+     * settle. Anything under 3 s is a stale pre-v13 value — take the default. */
+    if (c.settleMs >= 3000 && c.settleMs <= 20000) settleMs = c.settleMs;
     sipFxOn = c.sipFxOn ? 1 : 0;
     if (c.sipFxPat <= 9) sipFxPat = c.sipFxPat;
     if (c.sipFxAmp >= 1 && c.sipFxAmp <= 100) sipFxAmp = c.sipFxAmp;
@@ -1664,13 +1677,100 @@ static void imuTick()
   stableFlag = fabsf(newTilt - lastTilt) < 3.0f;
   lastTilt = tiltDeg = newTilt;
 
+  /* --------------------------------------------- v13: stillness-driven weigh --
+   * motion            -> the bottle is being handled, weight means nothing
+   * still + upright   -> open a window, average every weigh taken inside it
+   * window survives settleMs (8 s) -> that average IS the new stable weight
+   * sip = previous stable weight - new stable weight
+   * A measurement only ARMS after motion has been seen, so a pod sitting
+   * untouched cannot grind out phantom sips from slow drift.                   */
+  static bool     motionSeen  = false;   /* handled since the last measurement  */
+  static bool     baseValid   = false;   /* preTiltMl holds a real baseline     */
+  static uint32_t stillSince  = 0;       /* when the current still spell began  */
+  static uint32_t lastWinWeigh = 0;
+  static float    winSum      = 0;
+  static uint16_t winN        = 0;
+  uint32_t now = millis();
+
+  /* stillness: tilt not changing AND the accelerometer sitting at ~1 g. The
+   * tilt test alone misses a straight lift, which does not rotate the bottle. */
+  static float lastMag = 1.0f;
+  bool accStill = fabsf(mag - 1.0f) < STILL_ACC_TOL && fabsf(mag - lastMag) < STILL_ACC_TOL;
+  lastMag = mag;
+
+  if (gestureReset) { gestureReset = false; motionSeen = false; stillSince = 0; winSum = 0; winN = 0; }
+  if (!bottleIn) { podState = "OUT"; return; }     /* paused: no drink detection */
+
+  bool upright = (tiltDeg < TILT_UPRIGHT_DEG);
+  bool still   = stableFlag && accStill;
+
+  if (!still || !upright) {                        /* being handled            */
+    stillSince = 0; winSum = 0; winN = 0;
+    motionSeen = true;
+    podState = upright ? "MOVE" : "TILT";
+    return;
+  }
+
+  if (!stillSince) { stillSince = now; winSum = 0; winN = 0; lastWinWeigh = 0; }
+
+  /* accumulate weighs across the window rather than taking one reading at the
+   * end — the average is what the 8 s is FOR.                                 */
+  if (hxFound && !cellAbsent && (now - lastWinWeigh >= SIP_WIN_SAMPLE_MS)) {
+    lastWinWeigh = now;
+    hxWake();
+    long r = hxAverage(2);
+    if (r != LONG_MIN) {
+      float g = (float)(r - hxTare) / hxScale; if (g < 0) g = 0;
+      lastNetMl = g; winSum += g; winN++;
+    }
+    if (psActive) hxSleep();
+  }
+
+  if (now - stillSince < settleMs) {               /* window still running     */
+    podState = motionSeen ? "SETTLE" : "IDLE";
+    return;
+  }
+
+  /* ---- the window completed: this reading is trustworthy ---- */
+  float avg = winN ? (winSum / winN) : lastNetMl;
+  stillSince = now; winSum = 0; winN = 0;          /* re-arm the next window   */
+
+  if (!baseValid) {                                /* first ever reading       */
+    preTiltMl = avg; baseValid = true; motionSeen = false; podState = "IDLE"; return;
+  }
+  if (!motionSeen) {                               /* untouched — track drift
+                                                    * quietly so it can never
+                                                    * accumulate into a "sip"  */
+    preTiltMl = avg; podState = "IDLE"; return;
+  }
+
+  motionSeen = false;
+  float delta = preTiltMl - avg;                   /* + = went down = drunk    */
+  const char* verdict = (delta >= sipMinMl && delta <= SIP_MAX_ML) ? "SIP"
+                      : (delta <= -REFILL_MIN_ML)                  ? "REFILL" : "NONE";
+  char why[110];
+  snprintf(why, sizeof why, "EVT|DECIDE:%s|PRE:%d|POST:%d|D:%d|N:%u|WIN:%lu%s",
+           verdict, (int)preTiltMl, (int)avg, (int)delta, winN,
+           (unsigned long)settleMs,
+           strcmp(verdict, "NONE") ? "" : (delta > SIP_MAX_ML ? "|WHY:HUGE" : "|WHY:TINY"));
+  sendEvt(why);
+  if      (!strcmp(verdict, "SIP"))    doSip((uint32_t)delta, settleMs);
+  else if (!strcmp(verdict, "REFILL")) doAdd((uint32_t)(-delta));
+  preTiltMl = avg;
+  podState = "IDLE";
+}
+
+/* the old tilt-gesture machine lived here. It armed on a >35 deg tilt and
+ * measured 900 ms after the bottle returned upright, which is far too soon for
+ * a cell that was just set down — and its DISPOSE branch (hold past 150 deg)
+ * fired on ordinary handling. Both are gone; see the stillness window above.
+ * doDispose() itself is kept only as the manual serial 'dispose' test hook.   */
+#if 0
+static void legacyGestureMachine(uint32_t now, float mag)
+{
   static uint32_t tiltStart = 0, uprightSince = 0; static float peak = 0;
   static bool armed = false, wasUpright = false;
   static uint32_t settleAt = 0; static uint32_t gestureDur = 0; static float gesturePeak = 0;
-  uint32_t now = millis();
-
-  if (gestureReset) { gestureReset = false; armed = false; wasUpright = false; settleAt = 0; uprightSince = 0; }
-  if (!bottleIn) { podState = "OUT"; return; }     /* paused: no drink detection */
 
   if (tiltDeg < TILT_UPRIGHT_DEG) {
     if (!uprightSince) uprightSince = now;
@@ -1746,6 +1846,7 @@ static void imuTick()
     }
   }
 }
+#endif  /* legacy tilt-gesture machine */
 
 /* ------------------------------------------------------------ command parser -- */
 static uint32_t parseHexColor(const char* t)
@@ -1896,7 +1997,9 @@ static void handleCommand(char* cmd)
     sendEvt(b);
   }
   else if (!strcmp(cmd, "SIPCFG")) {
-    /* SIPCFG:<tilt 10-80>:<minMs 100-3000>:<maxMs 2000-20000>:<minMl 1-50>:<settleMs 300-3000>
+    /* SIPCFG:<tilt 10-80>:<minMs 100-3000>:<maxMs 2000-20000>:<minMl 1-50>:<settleMs 3000-20000>
+     * v13: only minMl and settleMs still affect detection — settleMs IS the
+     * stillness window. tilt/minMs/maxMs are retained for protocol compatibility.
      * or SIPCFG:RESET — how a sip gets registered, persisted                    */
     if (arg && !strncasecmp(arg, "RESET", 5)) {
       sipTilt = DEF_SIP_TILT; sipMinMs = DEF_SIP_MIN_MS; sipMaxMs = DEF_SIP_MAX_MS;
@@ -1908,7 +2011,7 @@ static void handleCommand(char* cmd)
       if (n == 5 &&
           v[0] >= 10 && v[0] <= 80 && v[1] >= 100 && v[1] <= 3000 &&
           v[2] >= 2000 && v[2] <= 20000 && v[2] > v[1] &&
-          v[3] >= 1 && v[3] <= 50 && v[4] >= 300 && v[4] <= 3000) {
+          v[3] >= 1 && v[3] <= 50 && v[4] >= 3000 && v[4] <= 20000) {   /* v13: 8 s window */
         sipTilt = v[0]; sipMinMs = v[1]; sipMaxMs = v[2]; sipMinMl = v[3]; settleMs = v[4];
         gestureReset = true;            /* re-arm cleanly under the new rules    */
         cfgSave(); sendAck("SIPCFG");
@@ -2432,7 +2535,7 @@ static void bleSetup()
 
   chrLive.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
   chrLive.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-  chrLive.setMaxLen(240); chrLive.begin();
+  chrLive.setMaxLen(260); chrLive.begin();   /* matches the live-frame buffer, which grew for VOLD */
 
   chrSip.setProperties(CHR_PROPS_NOTIFY);
   chrSip.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
