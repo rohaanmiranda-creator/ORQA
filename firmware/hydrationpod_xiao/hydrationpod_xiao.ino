@@ -97,7 +97,7 @@ using namespace Adafruit_LittleFS_Namespace;
  * a toss-out. Now: motion means the weight is untrustworthy, and a reading only
  * counts once the IMU has been still and upright for DEF_SETTLE_MS.            */
 #define STILL_ACC_TOL      0.05f  /* |accel| may deviate this much from 1 g     */
-#define SIP_WIN_SAMPLE_MS   500   /* weigh cadence inside the still window      */
+#define SIP_WIN_SAMPLE_MS  1000   /* weigh cadence inside the still window      */
 #define SIP_MAX_ML          400   /* a single sip larger than this is not a sip */
 #define REFILL_MIN_ML        20   /* weight GAIN this large is a refill         */
 static uint16_t sipTilt   = DEF_SIP_TILT;     /* arm the gesture above this tilt      */
@@ -204,7 +204,6 @@ static bool     psActive = false;
 
 /* ---- HX711 ---- */
 static bool   hxFound = false;        /* amplifier chip detected                  */
-static bool   cellAbsent = false;     /* chip alive but bridge unplugged          */
 static uint8_t hxDout = 2, hxSck = 3;
 static long   hxTare  = CAL_DEFAULT_TARE;
 static float  hxScale = CAL_DEFAULT_SCALE;
@@ -217,7 +216,6 @@ static long   hxLastRaw = LONG_MIN;   /* newest good raw average, for diagnostic
 static float  lastNetMl = 0;
 static float  preTiltMl = 0;
 static bool   hxSleeping = false;     /* powersave: PD_SCK held high              */
-static uint8_t cellBadBursts = 0, cellGoodBursts = 0;
 
 /* ---- DA7280 haptic ---- */
 static bool     hapFound = false;
@@ -437,27 +435,26 @@ static long hxReadRaw(uint8_t dout, uint8_t sck, uint16_t timeoutMs)
     delay(1);
   }
   long v = 0;
-  /* ONE clock pulse per critical section, not one per 25-pulse burst.
+  /* The ENTIRE 25-pulse burst runs with interrupts off, and must.
    *
-   * The HX711 powers itself down if PD_SCK is left HIGH past ~60 us, which is
-   * why this whole read used to run with interrupts off. But on the nRF52 the
-   * SoftDevice must service its radio interrupts on time, and a full burst
-   * holds them off for ~150 us — long enough to miss connection events and, at
-   * worst, assert the stack. That is the BLE dropping mid-session.
+   * A previous attempt at fixing the BLE dropout moved this to one critical
+   * section per pulse, on the reasoning that PD_SCK LOW has no maximum so the
+   * radio could run in the gaps. The waveform is legal on paper, but in
+   * practice letting the SoftDevice ISR land between bits desynchronises the
+   * shift and produces corrupt words — observed as reads 60k+ counts away from
+   * a cell that had not moved, which then blew past the absent-detector's
+   * threshold and flapped the cell in and out of simulated mode.
    *
-   * PD_SCK LOW has no maximum, so interrupts only need to be off for the HIGH
-   * half of each pulse — a few microseconds. The chip stays happy and the radio
-   * stays alive in the gaps.                                                   */
+   * Data integrity wins. The burst is atomic again; the BLE load is managed by
+   * reading FAR less often instead (see HX_MIN_GAP_MS and the callers), which
+   * is the correct lever — an occasional 150 us blackout is fine, ten a second
+   * is not.                                                                    */
+  noInterrupts();
   for (int i = 0; i < 24; i++) {
-    noInterrupts();
     digitalWrite(sck, HIGH); delayMicroseconds(1);
-    int bit = digitalRead(dout);          /* HX711 presents the bit while HIGH */
-    digitalWrite(sck, LOW);
-    interrupts();
-    v = (v << 1) | bit;
-    delayMicroseconds(1);                 /* LOW half — interrupts welcome     */
+    v = (v << 1) | digitalRead(dout);
+    digitalWrite(sck, LOW);  delayMicroseconds(1);
   }
-  noInterrupts();                         /* 25th pulse sets gain 128, ch A    */
   digitalWrite(sck, HIGH); delayMicroseconds(1);
   digitalWrite(sck, LOW);
   interrupts();
@@ -465,6 +462,24 @@ static long hxReadRaw(uint8_t dout, uint8_t sck, uint16_t timeoutMs)
   return v;
 }
 
+/* Outlier-rejecting read: three raw words, return the middle one. A single
+ * corrupted word — from a marginal connector, a long ISR, or noise on the
+ * clock line — cannot survive a median, whereas it walks straight through a
+ * mean. Everything on the live path goes through this now.                    */
+static long hxRead3(uint8_t dout, uint8_t sck)
+{
+  long a = hxReadRaw(dout, sck, 250); if (a == LONG_MIN) return LONG_MIN;
+  long b = hxReadRaw(dout, sck, 250); if (b == LONG_MIN) return a;
+  long c = hxReadRaw(dout, sck, 250); if (c == LONG_MIN) return (a < b) ? a : b;
+  if (a > b) { long t = a; a = b; b = t; }
+  if (b > c) { long t = b; b = c; c = t; }
+  if (a > b) { long t = a; a = b; b = t; }
+  return b;
+}
+
+/* Median-of-3 per sample, then average those medians. The inner median is what
+ * keeps a single corrupt word out of the result; the outer average is what
+ * smooths genuine noise. A plain mean of raw words does neither.              */
 static long hxAverage(uint8_t samples)
 {
   if (!hxFound) return LONG_MIN;
@@ -472,7 +487,7 @@ static long hxAverage(uint8_t samples)
   hxWake();
   int64_t acc = 0; uint8_t n = 0;
   for (uint8_t i = 0; i < samples; i++) {
-    long r = hxReadRaw(hxDout, hxSck, 250);
+    long r = hxRead3(hxDout, hxSck);
     if (r != LONG_MIN) { acc += r; n++; }
   }
   if (wasSleeping && psActive) hxSleep();
@@ -510,7 +525,7 @@ static long hxMedian(uint8_t n)
  * timeout so the caller can NAK rather than store a drifting reading.          */
 static long hxSettled()
 {
-  if (!hxFound || cellAbsent) return LONG_MIN;
+  if (!hxFound) return LONG_MIN;
   long tol = (long)(CAL_SETTLE_TOL_G * (hxScale > 1 ? hxScale : CAL_DEFAULT_SCALE));
   if (tol < 1) tol = 1;
   uint32_t t0 = millis();
@@ -539,49 +554,12 @@ static bool calApply(long tare, float scale)
   return true;
 }
 
-/* Bridge-absent detector: with no load cell the HX711 inputs float and the raw
- * value swings wildly (100k+ counts within a second) — nothing a real bridge
- * does, even when pressed. Two bad bursts latch ABSENT; two clean ones clear. */
-static void cellHealthCheck()
-{
-  if (!hxFound || !bottleIn) return;
-  if (bleDbg || calBusy) return;        /* bench-pressing the cell during a dev
-                                         * session — or placing a reference mass
-                                         * mid-calibration — swings raw hard; don't
-                                         * let the absent-detector latch on either */
-  static uint32_t nextCheck = 0;
-  if (millis() < nextCheck) return;
-  nextCheck = millis() + (cellAbsent ? 5000 : 15000);
-
-  bool wasSleeping = hxSleeping;
-  hxWake();
-  long mn = LONG_MAX, mx = LONG_MIN;
-  for (uint8_t i = 0; i < 4; i++) {
-    long r = hxReadRaw(hxDout, hxSck, 250);
-    if (r == LONG_MIN) return;          /* chip busy — try next round            */
-    if (r < mn) mn = r;
-    if (r > mx) mx = r;
-  }
-  if (wasSleeping && psActive) hxSleep();
-
-  long range = mx - mn;
-  bool railed = labs(mn) > 0x7C0000L && labs(mx) > 0x7C0000L;   /* pinned at full-scale = open input */
-  if (range > 80000L || railed) {
-    cellGoodBursts = 0;
-    if (cellBadBursts < 2 && ++cellBadBursts == 2 && !cellAbsent) {
-      cellAbsent = true;
-      sendEvt("EVT|UNSETTLED");
-      Serial.println("Load cell ABSENT (floating input) — simulated volume until it returns");
-    }
-  } else if (range < 5000L) {
-    cellBadBursts = 0;
-    if (cellAbsent && ++cellGoodBursts >= 2) {
-      cellAbsent = false; cellGoodBursts = 0;
-      sendEvt("EVT|READY");
-      Serial.println("Load cell back — live weight resumed");
-    }
-  }
-}
+/* The bridge-absent detector used to live here. It sampled the cell in bursts
+ * and latched ABSENT when the range across a burst exceeded a threshold, then
+ * fell back to simulated volume. On a final board with the cell permanently
+ * wired it has nothing to detect, and it actively misfired: one corrupt word,
+ * or simply placing a reference mass, would trip it and swap live readings for
+ * fiction. The cell is always there now. Removed.                             */
 
 /* "Pod out of the bottle" pause mode: freeze measurements + sleep the cell     */
 static void setBottleIn(bool in)
@@ -596,7 +574,7 @@ static void setBottleIn(bool in)
   } else {
     if (!psActive) hxWake();
     gestureReset = true;
-    if (hxFound && !cellAbsent) {       /* re-baseline: the out-period is not a sip */
+    if (hxFound) {       /* re-baseline: the out-period is not a sip */
       long r = hxAverage(3);
       if (r != LONG_MIN) { lastNetMl = (r - hxTare) / hxScale; if (lastNetMl < 0) lastNetMl = 0; }
     }
@@ -610,10 +588,11 @@ static void setBottleIn(bool in)
 
 static float netMl()
 {
-  if (!hxFound || cellAbsent) return simVolMl;
+  if (!hxFound) return simVolMl;
   if (!bottleIn) return lastNetMl;      /* paused: hold the last known reading   */
   if (hxSleeping) return lastNetMl;     /* powersave: no fresh weigh this frame  */
-  long r = hxAverage(2);
+  long r = hxRead3(hxDout, hxSck);
+  if (r != LONG_MIN) hxLastRaw = r;
   if (r == LONG_MIN) return lastNetMl;
   lastNetMl = (r - hxTare) / hxScale;
   if (lastNetMl < 0) lastNetMl = 0;
@@ -1218,7 +1197,7 @@ static void psTick()
     Serial.print("Power save: "); Serial.println(psActive ? "ACTIVE" : "off");
     if (psActive) hxSleep(); else hxWake();
   }
-  if (psActive && hxFound && !cellAbsent && millis() > nextPsWeigh) {
+  if (psActive && hxFound && millis() > nextPsWeigh) {
     nextPsWeigh = millis() + PS_WEIGH_PERIOD_MS;   /* periodic fresh reading      */
     long r = hxAverage(2);
     if (r != LONG_MIN) { lastNetMl = (r - hxTare) / hxScale; if (lastNetMl < 0) lastNetMl = 0; }
@@ -1417,7 +1396,6 @@ static PowerEst powerEst(bool asConnected, bool asPs)
   p.ble   = asConnected ? MA_BLE_CONN : MA_BLE_ADV;
   if (!hxFound)                     p.cell = 0;
   else if (asPs || !bottleIn)       p.cell = MA_CELL_SLEEP;
-  else if (cellAbsent)              p.cell = MA_CELL_NOCELL;
   else                              p.cell = MA_CELL_ACTIVE;
   p.imu = imuOk ? MA_IMU : 0;
   p.led = ledMaEst(asConnected);
@@ -1449,7 +1427,7 @@ static void sendDiagFrames()
   if (!connected || !bleDbg || !chrLive.notifyEnabled()) return;
   char f[240];
 
-  const char* cellSt = cellOff ? "OFF" : !hxFound ? "NONE" : cellAbsent ? "ABSENT" : "OK";
+  const char* cellSt = !hxFound ? "NONE" : "OK";
   snprintf(f, sizeof f,
     "D1|RAW:%ld|TARE:%ld|SC:%.1f|CELL:%s|HX:%u/%u|SLP:%u|IMU:%u|HAP:%u"
     "|PS:%u/%u|USB:%u|CHG:%u|BOT:%u|UP:%lu|HS:%lu/%lu|VER:6",
@@ -1464,7 +1442,7 @@ static void sendDiagFrames()
   now.board = podBusy() ? MA_BOARD : MA_BOARD_IDLE;   /* reflects the real loop pace */
   now.ble   = connected ? MA_BLE_CONN : MA_BLE_ADV;
   now.cell  = (cellOff || !hxFound) ? 0 : hxSleeping ? MA_CELL_SLEEP
-            : cellAbsent ? MA_CELL_NOCELL : bottleIn ? MA_CELL_ACTIVE : MA_CELL_SLEEP;
+            : bottleIn ? MA_CELL_ACTIVE : MA_CELL_SLEEP;
   now.imu   = imuOk ? MA_IMU : 0;
   now.led   = ledMaNow();
   now.hap   = hapFound ? (hapDriving ? 60.0f : MA_HAP_IDLE) : 0;
@@ -1506,47 +1484,30 @@ static void sendDiagFrames()
 static void sendRawStream()
 {
   static uint32_t nextDr = 0;
-  static long drPrev = LONG_MIN; static uint8_t drBig = 0, drCalm = 0, drRail = 0, drN = 0, drDead = 0;
+  static long drPrev = LONG_MIN; static uint8_t drN = 0, drDead = 0;
   if (!connected || !bleDbg || !hxFound || !chrLive.notifyEnabled()) return;
   if (millis() < nextDr) return;
-  nextDr = millis() + 150;
+  nextDr = millis() + 300;   /* was 150 — halves the busiest reader */
   if (hxSleeping) hxWake();             /* keep the cell alive while streaming   */
   long r = hxReadRaw(hxDout, hxSck, 120);
   if (r == LONG_MIN) {                  /* chip stopped answering mid-session?   */
     if (++drDead >= 10) {               /* ~1.5 s of silence = amplifier gone    */
-      drDead = 0; hxFound = false; cellAbsent = false; drPrev = LONG_MIN; drN = drBig = drCalm = 0;
+      drDead = 0; hxFound = false; drPrev = LONG_MIN; drN = 0;
       sendEvt("EVT|UNSETTLED");
       Serial.println("HX711 vanished mid-session — devReprobeTick will re-find it when replugged");
     }
     return;
   }
   drDead = 0;
-  /* dev-session absent detector (cellHealthCheck is muted while DBG streams so
-   * bench presses can't false-latch): a PRESS moves raw in 1-2 big steps; a
-   * FLOATING input jumps wildly on nearly every sample. Judge every 8 samples. */
-  if (drPrev != LONG_MIN) {
-    long d = labs(r - drPrev);
-    drN++;
-    if (d > 70000L) drBig++;
-    if (d < 5000L)  drCalm++;
-    if (labs(r) > 0x7C0000L) drRail++;  /* pinned near ±full-scale = open input   */
-    if (drN >= 8) {
-      if ((drBig >= 6 || drRail >= 6) && !cellAbsent) {
-        cellAbsent = true; sendEvt("EVT|UNSETTLED");
-        Serial.println(drRail >= 6 ? "Load cell ABSENT (input railed at full-scale)"
-                                   : "Load cell ABSENT (floating-input signature on the dev stream)");
-      } else if (drCalm >= 8 && drRail == 0 && cellAbsent) {
-        cellAbsent = false; sendEvt("EVT|READY");
-        Serial.println("Load cell back — steady readings on the dev stream");
-      }
-      drN = drBig = drCalm = drRail = 0;
-    }
-  }
+  /* The dev stream used to run its own absent detector here, latching on a
+   * "floating input" signature. With the cell permanently wired that signature
+   * only ever came from corrupt words or a bench press, so it is gone. The
+   * trace itself stays — it is still the fastest way to see the cell respond. */
   drPrev = r;
   hxLastRaw = r;
   char f[80];
   snprintf(f, sizeof f, "DR|RAW:%ld|G:%.1f|CELL:%s",
-           r, (r - hxTare) / hxScale, cellAbsent ? "ABSENT" : "OK");
+           r, (r - hxTare) / hxScale, "OK");
   chrLive.notify(f, strlen(f));
 }
 
@@ -1597,30 +1558,16 @@ static void sendLiveFrame()
   }
   if (dbgFrames) { Serial.print("[live] "); Serial.println(f); }
 
-  /* motion-response check — the permanent automatic tell: a REAL bridge must
-   * wiggle when the bottle visibly moves. 8+ s of clear tilting with a frozen
-   * reading (<~0.25 g of change) means no bridge is connected.                 */
-  static long mrLo = LONG_MAX, mrHi = LONG_MIN; static float mtLo = 999, mtHi = -999; static uint8_t mrN = 0;
-  if (hxFound && !cellAbsent && bottleIn && !hxSleeping && !stableFlag && hxLastRaw != LONG_MIN) {
-    if (hxLastRaw < mrLo) mrLo = hxLastRaw;
-    if (hxLastRaw > mrHi) mrHi = hxLastRaw;
-    if (tiltDeg < mtLo) mtLo = tiltDeg;
-    if (tiltDeg > mtHi) mtHi = tiltDeg;
-    if (++mrN >= 8) {
-      if (mtHi - mtLo >= 12 && (mrHi - mrLo) < 100) {
-        cellAbsent = true; sendEvt("EVT|UNSETTLED");
-        Serial.println("Load cell ABSENT (no response to motion)");
-      }
-      mrN = 0; mrLo = LONG_MAX; mrHi = LONG_MIN; mtLo = 999; mtHi = -999;
-    }
-  } else { mrN = 0; mrLo = LONG_MAX; mrHi = LONG_MIN; mtLo = 999; mtHi = -999; }
+  /* A motion-response check lived here: if the bottle clearly tilted but the
+   * raw reading never moved, it declared the bridge disconnected. On a final
+   * board that is a false-positive generator, not a diagnostic. Removed.      */
 }
 
 /* --------------------------------------------------------------- water events -- */
 static void doSip(uint32_t ml, uint32_t durMs)
 {
   if (!ml) return;
-  if (!hxFound || cellAbsent) { if (ml > (uint32_t)simVolMl) ml = (uint32_t)simVolMl; simVolMl -= ml; }
+  if (!hxFound) { if (ml > (uint32_t)simVolMl) ml = (uint32_t)simVolMl; simVolMl -= ml; }
   if (!ml) return;
   sips++; totMl += ml; sipSeq++;
   lastSipMs = millis();                              /* smart reminders anchor    */
@@ -1641,7 +1588,7 @@ static void doSip(uint32_t ml, uint32_t durMs)
 
 static void doAdd(uint32_t ml)
 {
-  if (!hxFound || cellAbsent) {
+  if (!hxFound) {
     if ((uint32_t)simVolMl + ml > BOTTLE_CAPACITY_ML) ml = BOTTLE_CAPACITY_ML - (uint32_t)simVolMl;
     if (!ml) return;
     simVolMl += ml;
@@ -1657,7 +1604,7 @@ static void doAdd(uint32_t ml)
 
 static void doDispose(uint32_t ml, int peakDeg, uint32_t durMs)
 {
-  if (!hxFound || cellAbsent) { if (ml > (uint32_t)simVolMl) ml = (uint32_t)simVolMl; if (!ml) return; simVolMl -= ml; }
+  if (!hxFound) { if (ml > (uint32_t)simVolMl) ml = (uint32_t)simVolMl; if (!ml) return; simVolMl -= ml; }
   disposes++; disposeMl += ml;
   char b[96];
   snprintf(b, sizeof b, "EVT|DISPOSE:%lu|VOL:%d|DTOT:%lu|PEAK:%d|DUR:%lu",
@@ -1733,11 +1680,11 @@ static void imuTick()
 
   /* accumulate weighs across the window rather than taking one reading at the
    * end — the average is what the 8 s is FOR.                                 */
-  if (hxFound && !cellAbsent && (now - lastWinWeigh >= SIP_WIN_SAMPLE_MS)) {
+  if (hxFound && (now - lastWinWeigh >= SIP_WIN_SAMPLE_MS)) {
     lastWinWeigh = now;
     hxWake();
-    long r = hxAverage(2);
-    if (r != LONG_MIN) {
+    long r = hxRead3(hxDout, hxSck);
+    if (r != LONG_MIN) { hxLastRaw = r;
       float g = (float)(r - hxTare) / hxScale; if (g < 0) g = 0;
       lastNetMl = g; winSum += g; winN++;
       if (winN == 1) { winMin = winMax = g; }
@@ -1805,7 +1752,7 @@ static void legacyGestureMachine(uint32_t now, float mag)
   if (settleAt && now > settleAt && tiltDeg < TILT_UPRIGHT_DEG) {
     settleAt = 0;
     char why[110];                                 /* the decision + its inputs, for the app's dev panel */
-    if (hxFound && !cellAbsent) {
+    if (hxFound) {
       hxWake();                                    /* powersave: fresh weigh    */
       long r = hxAverage(3);
       float post = (r != LONG_MIN) ? (r - hxTare) / hxScale : preTiltMl;
@@ -1842,7 +1789,7 @@ static void legacyGestureMachine(uint32_t now, float mag)
     if (tiltDeg > peak) peak = tiltDeg;
     uint32_t held = now - tiltStart;
 
-    if (peak >= DISPOSE_DEG && held >= DISPOSE_HOLD_MS && tiltDeg >= DISPOSE_DEG && (!hxFound || cellAbsent)) {
+    if (peak >= DISPOSE_DEG && held >= DISPOSE_HOLD_MS && tiltDeg >= DISPOSE_DEG && (!hxFound)) {
       doDispose(min((uint32_t)simVolMl, (uint32_t)150), (int)peak, held);
       armed = false; wasUpright = false; podState = "SETTLE";
     }
@@ -1887,7 +1834,7 @@ static void handleCommand(char* cmd)
   Serial.println();
 
   if (!strcmp(cmd, "TARE")) {
-    if (hxFound && !cellAbsent) {
+    if (hxFound) {
       calBusy = true;
       long r = hxSettled();             /* wait for it to stop moving           */
       calBusy = false;
@@ -1968,7 +1915,7 @@ static void handleCommand(char* cmd)
      * so creep during placement can't be baked into the factor, and rejects a
      * result outside the plausibility band. Replies EVT|CALW on success.       */
     uint32_t g = arg ? strtoul(arg, nullptr, 10) : 0;
-    if (!(g >= 20 && g <= 5000) || !hxFound || cellAbsent) { sendNak("CALW"); return; }
+    if (!(g >= 20 && g <= 5000) || !hxFound) { sendNak("CALW"); return; }
     calBusy = true;
     long r = hxSettled();
     calBusy = false;
@@ -2117,11 +2064,11 @@ static void handleCommand(char* cmd)
     if (arg && arg[0] == '1') {
       if (hxFound) hxSleep();           /* PD_SCK high = chip power-down          */
       else { pinMode(3, OUTPUT); digitalWrite(3, HIGH); }   /* known wiring: park it anyway */
-      hxFound = false; cellAbsent = false; cellOff = 1;
+      hxFound = false; cellOff = 1;
       cfgSave(); sendAck("CELLOFF"); sendEvt("EVT|UNSETTLED");
       Serial.println("Load cell switched OFF from the app");
     } else if (arg && arg[0] == '0') {
-      cellOff = 0; hxFound = false; cellAbsent = false; hxProbe();
+      cellOff = 0; hxFound = false; hxProbe();
       cfgSave(); sendAck("CELLOFF");
       sendEvt(hxFound ? "EVT|READY" : "EVT|UNSETTLED");
     } else sendNak("CELLOFF");
@@ -2129,7 +2076,7 @@ static void handleCommand(char* cmd)
   else if (!strcmp(cmd, "HXPROBE")) {
     /* full re-scan for the HX711 — the Dev tab's re-detect button (also clears
      * a CELLOFF, since re-detecting is an explicit request to use the cell)     */
-    cellOff = 0; hxFound = false; cellAbsent = false; cellBadBursts = cellGoodBursts = 0;
+    cellOff = 0; hxFound = false;
     hxProbe();
     sendAck("HXPROBE");
     sendEvt(hxFound ? "EVT|READY" : "EVT|UNSETTLED");
@@ -2329,7 +2276,7 @@ static void serialTick()
     else if (!strncasecmp(line, "add", 3))      doAdd(v > 0 ? v : 250);
     else if (!strncasecmp(line, "dispose", 7))  doDispose(v > 0 ? v : 100, 165, 2000);
     else if (!strncasecmp(line, "tare", 4)) {
-      if (hxFound && !cellAbsent) {
+      if (hxFound) {
         Serial.println("taring — hold still...");
         calBusy = true; long r = hxSettled(); calBusy = false;
         if (r == LONG_MIN) Serial.println("reading never settled — zero unchanged");
@@ -2338,7 +2285,7 @@ static void serialTick()
       else { simVolMl = 0; Serial.println("tared (sim)"); }
     }
     else if (!strncasecmp(line, "calw", 4)) {
-      if (!hxFound || cellAbsent) Serial.println("no live load cell");
+      if (!hxFound) Serial.println("no live load cell");
       else if (v > 0) {
         Serial.println("calibrating — hold still...");
         calBusy = true; long r = hxSettled(); calBusy = false;
@@ -2377,7 +2324,7 @@ static void serialTick()
         Serial.print("raw="); Serial.print(r);
         Serial.print(" tare="); Serial.print(hxTare);
         Serial.print(" scale="); Serial.print(hxScale);
-        Serial.print(" cell="); Serial.print(cellAbsent ? "ABSENT" : "ok");
+        Serial.print(" cell="); Serial.print(hxFound ? "ok" : "NONE");
         Serial.print(" -> "); Serial.print(netMl()); Serial.println(" ml"); }
       else Serial.println("no HX711 — sim vol only");
     }
@@ -2413,7 +2360,7 @@ static void serialTick()
       else Serial.println("clock not set (app sends SETTIME on connect)");
     }
     else if (!strncasecmp(line, "scan", 4)) { i2cScan(Wire, "external D4/D5"); i2cScan(Wire1, "internal"); }
-    else if (!strncasecmp(line, "hxprobe", 7)) { hxFound = false; cellAbsent = false; hxProbe(); }
+    else if (!strncasecmp(line, "hxprobe", 7)) { hxFound = false; hxProbe(); }
     else if (!strncasecmp(line, "ringpin", 7)) {
       if (v >= 0 && v <= 10 && v != 4 && v != 5) {
         ringPin = (uint8_t)v; ring.setPin(ringPin); cfgSave();
@@ -2487,7 +2434,7 @@ static void serialTick()
       Serial.print(" goal="); Serial.print(goalMl);
       Serial.print(" tilt="); Serial.print((int)tiltDeg);
       Serial.print(" imu=");  Serial.print(imuOk ? "ok" : "OFF");
-      Serial.print(" hx711=");Serial.print(!hxFound ? "SIM" : cellAbsent ? "NO-CELL" : "ok");
+      Serial.print(" hx711=");Serial.print(hxFound ? "ok" : "NOT FOUND");
       if (hxFound) { Serial.print("(D"); Serial.print(hxDout); Serial.print("/D"); Serial.print(hxSck); Serial.print(")"); }
       Serial.print(" da7280=");Serial.print(hapFound ? "ok" : "NONE");
       Serial.print("@"); Serial.print(hapStrength); Serial.print("%");
@@ -2659,7 +2606,6 @@ void loop()
   serialTick();
   ledTick();
   hapticTick();
-  cellHealthCheck();
   battTick();
   psTick();
   clockTick();
